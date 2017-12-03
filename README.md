@@ -8,9 +8,11 @@ In a CI environment, builds need to be able to create containers, networks and v
 
 Docker Safety Sock (dsm) provides a proxy around the [docker socket]() that is passed to the container that safely runs the build. The proxied socket adds restrictions around what can be accessed via the socket.
 
+When an image is build or a container created, a label is assigned to it with an `ownerid`. Each socket has a unique ownerid. Subsequently, operations check the ownership label and disallow operating on things that the socket didn't create.
+
 ## How is this solved elsewhere?
 
-Docker provides an ACL system in their Enterprise product, and also provides a plugin API with authorization hooks. At this stage the plugin eco-system is still pretty new.
+Docker provides an ACL system in their Enterprise product, and also provides a plugin API with authorization hooks. At this stage the plugin eco-system is still pretty new. The advantage of using a local socket is that you can use filesystem permissions to control access to it.
 
 Another approach is Docker-in-docker, which is unfortunately slow and fraught with issues.
 
@@ -18,6 +20,8 @@ Another approach is Docker-in-docker, which is unfortunately slow and fraught wi
 ## Endpoints Implemented
 
 https://docs.docker.com/engine/api/v1.32
+
+### Containers (Done)
 
 - [*] GET /containers/json (filtered)
 - [*] POST /containers/create (label added)
@@ -43,38 +47,49 @@ https://docs.docker.com/engine/api/v1.32
 - [*] HEAD /containers/{id}/archive (ownership check)
 - [*] GET /containers/{id}/archive (ownership check)
 - [*] PUT /containers/{id}/archive (ownership check)
+- [*] POST /containers/{id}/exec (ownership check)
 - [*] POST /containers/prune (filtered)
+- [*] POST /exec/{id}/start
+- [*] POST /exec/{id}/resize
+- [*] GET /exec/{id}/json
+
+### Images (Partial)
+
 - [*] GET /images/json (filtered)
 - [*] POST /build (label added)
 - [*] POST /build/prune  (filtered)
 - [ ] POST /images/create
-- [ ] GET /images/{name}/json
-- [ ] GET /images/{name}/history
-- [ ] PUSH /images/{name}/push
-- [ ] POST  /images/{name}/tag
-- [ ] REMOVE /images/{name}
+- [*] GET /images/{name}/json
+- [*] GET /images/{name}/history
+- [*] PUSH /images/{name}/push
+- [*] POST  /images/{name}/tag
+- [*] REMOVE /images/{name}
 - [ ] GET /images/search
-- [ ] POST /images/prune
+- [*] POST /images/prune
 - [ ] POST /commit
-- [ ] POST /images/{name}/get
+- [*] POST /images/{name}/get
 - [ ] GET /images/get
 - [ ] POST /images/load
-- [ ] GET /networks
-- [ ] GET /networks/{id}
-- [ ] GET /networks/{id}
-- [ ] POST /networks/create
-- [ ] POST /networks/{id}/connect
-- [ ] POST /networks/{id}/disconnect
-- [ ] POST /networks/prune
-- [ ] GET /volumes
-- [ ] POST /volumes/create
-- [ ] GET /volumes/{name}
-- [ ] DELETE /volumes/{name}
-- [ ] POST /volumes/prune
-- [ ] POST /containers/{id}/exec
-- [ ] POST /exec/{id}/start
-- [ ] POST /exec/{id}/resize
-- [ ] GET /exec/{id}/json
+
+### Networks (Done)
+
+- [*] GET /networks
+- [*] GET /networks/{id}
+- [*] POST /networks/create
+- [*] POST /networks/{id}/connect
+- [*] POST /networks/{id}/disconnect
+- [*] POST /networks/prune
+
+### Volumes
+
+- [*] GET /volumes
+- [*] POST /volumes/create
+- [*] GET /volumes/{name}
+- [*] DELETE /volumes/{name}
+- [()] POST /volumes/prune
+
+### Swarm (Disabled)
+
 - [ ] GET /swarm
 - [ ] POST /swarm/init
 - [ ] POST /swarm/join
@@ -94,11 +109,15 @@ https://docs.docker.com/engine/api/v1.32
 - [ ] GET /services/{id}/logs
 - [ ] GET /tasks
 - [ ] GET /tasks/{id}
+- [ ] GET /tasks/{id}/logs
 - [ ] GET /secrets
 - [ ] POST /secrets/create
 - [ ] GET /secrets/{id}
 - [ ] DELETE /secrets/{id}
 - [ ] POST /secrets/{id}/update
+
+### Plugins (Disabled)
+
 - [ ] GET /plugins
 - [ ] GET /plugins/privileges
 - [ ] POST /plugins/pull
@@ -109,17 +128,23 @@ https://docs.docker.com/engine/api/v1.32
 - [ ] POST /plugins/{name}/upgrade
 - [ ] POST /plugins/create
 - [ ] POST /plugins/{name}/set
+
+### System
+
 - [ ] POST /auth
-- [ ] POST /info
+- [*] POST /info
 - [ ] GET /version
 - [*] GET /_ping (direct)
 - [ ] GET /events
 - [ ] GET /system/df
+- [ ] GET /distribution/{name}/json
+- [ ] POST /session
+
+### Configs
+
 - [ ] GET /configs
 - [ ] POST /configs/create
 - [ ] GET /configs/{id}
 - [ ] DELETE /configs/{id}
 - [ ] POST /configs/{id}/update
-- [ ] GET /distribution/{name}/json
-- [ ] POST /session
-- [ ] GET /tasks/{id}/logs
+

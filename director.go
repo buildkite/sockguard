@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -51,57 +52,160 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	}
 
 	switch {
-	case match(`GET`, `^/_ping$`), match(`GET`, `^/version$`):
+	case match(`GET`, `^/(_ping|version|info)$`):
 		return upstream
 
-	case match(`POST`, `/containers/(create|prune)`):
+	// Container related endpoints
+	case match(`POST`, `^/containers/create$`):
 		return r.addLabelsToBody(l, req, upstream)
-	case match(`GET`, `/containers/json`):
+	case match(`POST`, `^/containers/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
-	case match(`*`, `/containers/(\w+)\b`):
-		if ok, err := r.checkContainerOwner(req); ok {
-			l.Printf("Container matches owner %q", r.Owner)
+	case match(`GET`, `^/containers/json$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`*`, `^/(containers|exec)/(\w+)\b`):
+		if ok, err := r.checkOwner(l, "containers", false, req); ok {
+			return upstream
+		} else if err == errInspectNotFound {
+			l.Printf("Container not found, allowing")
 			return upstream
 		} else if err != nil {
 			return errorHandler(err.Error(), http.StatusInternalServerError)
 		}
 		return errorHandler("Unauthorized access to container", http.StatusUnauthorized)
 
-	case match(`POST`, `/build`):
+	// Build related endpoints
+	case match(`POST`, `^/build$`):
 		return r.addLabelsToQueryStringLabels(l, req, upstream)
-	case match(`POST`, `/images/prune`):
+
+	// Image related endpoints
+	case match(`GET`, `^/images/json$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`POST`, `^/images/create$`):
+		return upstream
+	case match(`POST`, `^/images/(create|search|get|load)$`):
+		break
+	case match(`POST`, `^/images/prune$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`*`, `^/images/(\w+)\b`):
+		if ok, err := r.checkOwner(l, "images", true, req); ok {
+			return upstream
+		} else if err == errInspectNotFound {
+			l.Printf("Image not found, allowing")
+			return upstream
+		} else if err != nil {
+			return errorHandler(err.Error(), http.StatusInternalServerError)
+		}
+		return errorHandler("Unauthorized access to image", http.StatusUnauthorized)
+
+	// Network related endpoints
+	case match(`GET`, `^/networks$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`POST`, `^/networks/create$`):
+		return r.addLabelsToBody(l, req, upstream)
+	case match(`POST`, `^/networks/prune$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`GET`, `^/networks/(\w+)$`),
+		match(`DELETE`, `^/networks/(\w+)$`),
+		match(`POST`, `^/networks/(\w+)/(connect|disconnect)$`):
+		if ok, err := r.checkOwner(l, "networks", true, req); ok {
+			return upstream
+		} else if err == errInspectNotFound {
+			l.Printf("Network not found, allowing")
+			return upstream
+		} else if err != nil {
+			return errorHandler(err.Error(), http.StatusInternalServerError)
+		}
+		return errorHandler("Unauthorized access to network", http.StatusUnauthorized)
+
+	// Volumes related endpoints
+	case match(`GET`, `^/volumes$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`POST`, `^/volumes/create$`):
+		return r.addLabelsToBody(l, req, upstream)
+	case match(`POST`, `^/volumes/prune$`):
+		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`GET`, `^/volumes/(\w+)$`), match(`DELETE`, `^/volumes/(\w+)$`):
+		if ok, err := r.checkOwner(l, "volumes", true, req); ok {
+			return upstream
+		} else if err == errInspectNotFound {
+			l.Printf("Volume not found, allowing")
+			return upstream
+		} else if err != nil {
+			return errorHandler(err.Error(), http.StatusInternalServerError)
+		}
+		return errorHandler("Unauthorized access to volume", http.StatusUnauthorized)
+
 	}
 
-	return upstream
+	return errorHandler(req.Method+" "+req.URL.Path+" not implemented yet", http.StatusNotImplemented)
 }
 
-func (r *rulesDirector) checkContainerOwner(req *http.Request) (bool, error) {
+var identifierPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^/containers/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/networks/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/volumes/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/images/(.+?)/(?:json|history|push|tag)$`),
+	regexp.MustCompile(`^/images/([^/]+)$`),
+	regexp.MustCompile(`^/images/(\w+/[^/]+)$`),
+}
+
+// Check owner takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
+// got the correct owner label.
+func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
 	path := req.URL.Path
 	if versionRegex.MatchString(path) {
 		path = versionRegex.ReplaceAllString(path, "")
 	}
-	m := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(m) < 2 {
-		return false, fmt.Errorf("Path doesn't contain a container id")
+
+	var identifier string
+
+	for _, re := range identifierPatterns {
+		if m := re.FindStringSubmatch(path); len(m) > 0 {
+			log.Printf("%v %v", re, m)
+			identifier = m[1]
+		}
 	}
 
-	c, err := r.inspectContainer(m[1])
+	if identifier == "" {
+		return false, fmt.Errorf("Unable to find an identifier in %s", path)
+	}
+
+	l.Printf("Looking up %s", identifier)
+
+	labels, err := r.inspectLabels(kind, identifier)
 	if err != nil {
 		return false, err
 	}
 
-	return c.HasLabel(ownerKey, r.Owner), nil
+	l.Printf("Labels for %s: %v", path, labels)
+
+	if val, exists := labels[ownerKey]; exists && val == r.Owner {
+		l.Printf("Allow, %s matches owner %q", path, r.Owner)
+		return true, nil
+	} else if !exists && allowEmpty {
+		l.Printf("Allow, %s has no owner", path)
+		return true, nil
+	} else {
+		l.Printf("Deny, %s has owner %q, wanted %q", path, val, r.Owner)
+		return false, nil
+	}
 }
 
 func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		l.Printf("Adding labels to Labels in request body: %s", req.URL.Path)
-
 		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
-			mergeLabels("Labels", decoded, map[string]string{
+			var labels = map[string]string{
 				ownerKey: r.Owner,
-			})
+			}
+			l.Printf("Adding labels %v to body %v", labels, decoded["Labels"])
+			for k, v := range labels {
+				switch t := decoded["Labels"].(type) {
+				case map[string]interface{}:
+					t[k] = v
+				default:
+					l.Printf("Found %T instead", decoded["Labels"])
+				}
+			}
 		})
 		if err != nil {
 			l.Printf("Err: %v", err)
@@ -115,23 +219,19 @@ func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstre
 
 func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		label := fmt.Sprintf("%s=%s", ownerKey, r.Owner)
-
-		l.Printf("Adding label %s=%s to filters in querystring: %s %s",
-			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)
-
-		err := modifyRequestFilters(req, func(filters map[string][]string) {
-			for k, vals := range filters {
-				if k == "label" {
-					vals = append(vals, label)
-					return
+		err := modifyRequestFilters(req, func(filters map[string][]interface{}) {
+			label := ownerKey + "=" + r.Owner
+			l.Printf("Adding label %v to label filters %v", label, filters["label"])
+			filters["label"] = []interface{}{label}
+			for _, val := range filters["label"] {
+				if valString, ok := val.(string); ok {
+					if valString != ownerKey && !strings.HasPrefix(valString, ownerKey+"=") {
+						filters["label"] = append(filters["label"], valString)
+					}
 				}
 			}
-			filters["label"] = []string{label}
-			return
 		})
 		if err != nil {
-			l.Printf("Err: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -170,50 +270,79 @@ func (r *rulesDirector) addLabelsToQueryStringLabels(l *log.Logger, req *http.Re
 	})
 }
 
-type containerInspection struct {
-	Config struct {
-		Labels map[string]string `json:"Labels"`
-	} `json:"Config"`
-}
+var errInspectNotFound = errors.New("Not found")
 
-func (c containerInspection) HasLabel(key, value string) bool {
-	for k, val := range c.Config.Labels {
-		if k == key && val == value {
-			return true
-		}
-	}
-	return false
-}
+func (r *rulesDirector) getInto(into interface{}, path string, arg ...interface{}) error {
+	u := fmt.Sprintf("http://docker/v%s%s", apiVersion, fmt.Sprintf(path, arg...))
 
-func (r *rulesDirector) inspectContainer(id string) (containerInspection, error) {
-	u := fmt.Sprintf("http://docker/v%s/containers/%s/json", apiVersion, id)
 	resp, err := r.Client.Get(u)
 	if err != nil {
-		return containerInspection{}, err
+		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return containerInspection{}, fmt.Errorf("Request to %q failed with %s", u, resp.Status)
+	if resp.StatusCode == http.StatusNotFound {
+		return errInspectNotFound
+	} else if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Request to %q failed: %s", u, resp.Status)
 	}
 
-	var result containerInspection
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return containerInspection{}, err
-	}
-
-	return result, nil
+	return json.NewDecoder(resp.Body).Decode(into)
 }
 
-func modifyRequestFilters(req *http.Request, f func(filters map[string][]string)) error {
-	var filters = map[string][]string{}
+func (r *rulesDirector) inspectLabels(kind, id string) (map[string]string, error) {
+	switch kind {
+	case "containers", "images":
+		var result struct {
+			Config struct {
+				Labels map[string]string
+			}
+		}
+
+		if err := r.getInto(&result, "/"+kind+"/%s/json", id); err != nil {
+			return nil, err
+		}
+
+		return result.Config.Labels, nil
+	case "networks", "volumes":
+		var result struct {
+			Labels map[string]string
+		}
+
+		if err := r.getInto(&result, "/"+kind+"/%s", id); err != nil {
+			return nil, err
+		}
+
+		return result.Labels, nil
+	}
+
+	return nil, fmt.Errorf("Unknown kind %q", kind)
+}
+
+func modifyRequestFilters(req *http.Request, f func(filters map[string][]interface{})) error {
+	var filters = map[string][]interface{}{}
 	var q = req.URL.Query()
 
 	if encoded := q.Get("filters"); encoded != "" {
-		if err := json.NewDecoder(strings.NewReader(encoded)).Decode(&filters); err != nil {
+		var generic map[string]interface{}
+
+		log.Printf("filters=%q", encoded)
+		if err := json.NewDecoder(strings.NewReader(encoded)).Decode(&generic); err != nil {
 			return err
 		}
+		for k, v := range generic {
+			switch tv := v.(type) {
+			case map[string]interface{}:
+				for mk, mv := range tv {
+					log.Printf("Adding %s = %v", mk, mv)
+					filters[k] = []interface{}{mk}
+				}
+			default:
+				log.Printf("[%s] Got type %T: %v", k, v, tv)
+			}
+		}
+
+		log.Printf("%#v", filters)
 	}
 
 	f(filters)
@@ -247,14 +376,4 @@ func modifyRequestBody(req *http.Request, f func(filters map[string]interface{})
 	req.Body = ioutil.NopCloser(bytes.NewReader(encoded))
 
 	return nil
-}
-
-func mergeLabels(key string, into map[string]interface{}, labels map[string]string) {
-	if exists, ok := into[key].(map[string]string); ok {
-		for k, v := range labels {
-			exists[k] = v
-		}
-		return
-	}
-	into[key] = labels
 }

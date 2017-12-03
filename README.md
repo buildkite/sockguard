@@ -6,9 +6,15 @@ In a CI environment, builds need to be able to create containers, networks and v
 
 ## How it works
 
-Docker Safety Sock (dsm) provides a proxy around the [docker socket]() that is passed to the container that safely runs the build. The proxied socket adds restrictions around what can be accessed via the socket.
+Docker Safety Sock (dsm) provides a proxy around the docker socket that is passed to the container that safely runs the build. The proxied socket adds restrictions around what can be accessed via the socket.
 
-When an image is build or a container created, a label is assigned to it with an `ownerid`. Each socket has a unique ownerid. Subsequently, operations check the ownership label and disallow operating on things that the socket didn't create.
+When an image, container, volume or network is created it gets given a label of `com.buildkite.safety-sock.owner={identifier}`, which is the identifier of the specific instance of the socket proxy. Each subsequent operation is checked against this ownership socket and only a match (or in the case of images, the lack of an owner), is allowed to proceed for read or write operations.
+
+In addition, creation of containers imposes certain restrictions to ensure that containers are contained:
+
+* No `privileged` mode is allowed
+* By default no host bind mounts are allowed, but certain paths can be white-listed with `--allow-bind`
+* No `host` network mode is allowed
 
 ## How is this solved elsewhere?
 
@@ -16,10 +22,11 @@ Docker provides an ACL system in their Enterprise product, and also provides a p
 
 Another approach is Docker-in-docker, which is unfortunately slow and fraught with issues.
 
+## Implementation status
 
-## Endpoints Implemented
+Very alpha! Most of the high risk endpoints are covered decently. Not yet ready for production usage.
 
-https://docs.docker.com/engine/api/v1.32
+Based off https://docs.docker.com/engine/api/v1.32.
 
 ### Containers (Done)
 

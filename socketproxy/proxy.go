@@ -73,7 +73,6 @@ func (s *SocketProxy) ServeViaUpstreamSocket(l *log.Logger, w http.ResponseWrite
 
 	// Dial a new socket connection for this request. Re-use might be possible, but this gets
 	// things working reliably to start with
-	l.Printf("Dialing %s", s.path)
 	sock, err := net.Dial("unix", s.path)
 	if err != nil {
 		http.Error(w, "Error contacting backend server.", 500)
@@ -115,7 +114,9 @@ func (s *SocketProxy) ServeViaUpstreamSocket(l *log.Logger, w http.ResponseWrite
 			panic(err)
 		}
 
+		// TODO: deal with this
 		l.Printf("Buffered: %s", rbuf)
+		panic("Buffered bytes not handled")
 	}
 
 	var wg sync.WaitGroup

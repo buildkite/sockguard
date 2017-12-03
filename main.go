@@ -26,6 +26,7 @@ func main() {
 	filename := flag.String("filename", "docker-safety.sock", "The socket to create")
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
 	owner := flag.String("owner", "", "The string to use as the container owner")
+	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	flag.Parse()
 
 	if debug {
@@ -36,8 +37,15 @@ func main() {
 		*owner = fmt.Sprintf("safetysock-%d", os.Getpid())
 	}
 
+	var allowBinds []string
+
+	if *allowBind != "" {
+		allowBinds = []string{*allowBind}
+	}
+
 	proxy := socketproxy.New(*upstream, &rulesDirector{
-		Owner: *owner,
+		AllowBinds: allowBinds,
+		Owner:      *owner,
 		Client: &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {

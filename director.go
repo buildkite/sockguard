@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -22,8 +24,17 @@ var (
 )
 
 type rulesDirector struct {
-	Client *http.Client
-	Owner  string
+	Client     *http.Client
+	Owner      string
+	AllowBinds []string
+}
+
+func writeError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"message": msg,
+	})
 }
 
 func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
@@ -42,11 +53,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	var errorHandler = func(msg string, code int) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			l.Printf("Handler returned error %q", msg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(code)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"message": msg,
-			})
+			writeError(w, msg, code)
 			return
 		})
 	}
@@ -161,7 +168,6 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 
 	for _, re := range identifierPatterns {
 		if m := re.FindStringSubmatch(path); len(m) > 0 {
-			log.Printf("%v %v", re, m)
 			identifier = m[1]
 		}
 	}
@@ -170,7 +176,7 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 		return false, fmt.Errorf("Unable to find an identifier in %s", path)
 	}
 
-	l.Printf("Looking up %s", identifier)
+	l.Printf("Looking up identifier %q", identifier)
 
 	labels, err := r.inspectLabels(kind, identifier)
 	if err != nil {
@@ -196,29 +202,47 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 		var decoded map[string]interface{}
 
 		if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
+		// first we add our labels
+		addLabel(ownerKey, r.Owner, decoded["Labels"])
+
+		l.Printf("Labels: %#v", decoded["Labels"])
+
+		// prevent privileged mode
 		privileged := decoded["HostConfig"].(map[string]interface{})["Privileged"].(bool)
 
 		if privileged {
 			l.Printf("Denied privileged on container create")
-			http.Error(w,
-				"Containers aren't allowed to run as privileged",
-				http.StatusUnauthorized)
+			writeError(w, "Containers aren't allowed to run as privileged", http.StatusUnauthorized)
 			return
 		}
 
-		// l.Printf("HostConfig: %#v", decoded["HostConfig"])
-		// l.Printf("Volumes: %#v", decoded["Volumes"])
-		// l.Printf("Labels: %#v", decoded["Labels"])
+		// filter binds, don't allow host binds
+		binds := decoded["HostConfig"].(map[string]interface{})["Binds"].([]interface{})
 
-		addLabel(ownerKey, r.Owner, decoded["Labels"])
+		for _, bind := range binds {
+			if !isBindAllowed(bind.(string), r.AllowBinds) {
+				l.Printf("Denied host bind %q", bind)
+				writeError(w, "Host binds aren't allowed", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// prevent host and container network mode
+		networkMode := decoded["HostConfig"].(map[string]interface{})["NetworkMode"].(string)
+
+		if networkMode == "host" {
+			l.Printf("Denied host network mode on container create")
+			writeError(w, "Containers aren't allowed to use host networking", http.StatusUnauthorized)
+			return
+		}
 
 		encoded, err := json.Marshal(decoded)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -228,6 +252,30 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 
 		upstream.ServeHTTP(w, req)
 	})
+}
+
+func isBindAllowed(bind string, allowed []string) bool {
+	chunks := strings.Split(bind, ":")
+
+	// host-src:container-dest
+	// host-src:container-dest:ro
+	// volume-name:container-dest
+	// volume-name:container-dest:ro
+
+	// TODO: better heuristic for host-src vs volume-name
+	if strings.ContainsAny(chunks[0], ".\\/") {
+		hostSrc := filepath.FromSlash(path.Clean("/" + chunks[0]))
+
+		for _, allowedPath := range allowed {
+			if rel, _ := filepath.Rel(allowedPath, hostSrc); rel == "." {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	return true
 }
 
 func addLabel(label, value string, into interface{}) {

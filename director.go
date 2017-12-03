@@ -57,7 +57,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 
 	// Container related endpoints
 	case match(`POST`, `^/containers/create$`):
-		return r.addLabelsToBody(l, req, upstream)
+		return r.handleContainerCreate(l, req, upstream)
 	case match(`POST`, `^/containers/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
 	case match(`GET`, `^/containers/json$`):
@@ -191,28 +191,63 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 	}
 }
 
-func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
-			var labels = map[string]string{
-				ownerKey: r.Owner,
-			}
-			l.Printf("Adding labels %v to body %v", labels, decoded["Labels"])
-			for k, v := range labels {
-				switch t := decoded["Labels"].(type) {
-				case map[string]interface{}:
-					t[k] = v
-				default:
-					l.Printf("Found %T instead", decoded["Labels"])
-				}
-			}
-		})
-		if err != nil {
-			l.Printf("Err: %v", err)
+		var decoded map[string]interface{}
+
+		if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
+		privileged := decoded["HostConfig"].(map[string]interface{})["Privileged"].(bool)
+
+		if privileged {
+			l.Printf("Denied privileged on container create")
+			http.Error(w,
+				"Containers aren't allowed to run as privileged",
+				http.StatusUnauthorized)
+			return
+		}
+
+		// l.Printf("HostConfig: %#v", decoded["HostConfig"])
+		// l.Printf("Volumes: %#v", decoded["Volumes"])
+		// l.Printf("Labels: %#v", decoded["Labels"])
+
+		addLabel(ownerKey, r.Owner, decoded["Labels"])
+
+		encoded, err := json.Marshal(decoded)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// reset it so that upstream can read it again
+		req.ContentLength = int64(len(encoded))
+		req.Body = ioutil.NopCloser(bytes.NewReader(encoded))
+
+		upstream.ServeHTTP(w, req)
+	})
+}
+
+func addLabel(label, value string, into interface{}) {
+	switch t := into.(type) {
+	case map[string]interface{}:
+		t[label] = value
+	default:
+		log.Printf("Found unhandled label type %T: %v", into, t)
+	}
+}
+
+func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
+			addLabel(ownerKey, r.Owner, decoded["Labels"])
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		upstream.ServeHTTP(w, req)
 	})
 }

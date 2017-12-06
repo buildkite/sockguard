@@ -11,7 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/buildkite/docker-safety-sock/socketproxy"
+	"github.com/buildkite/sockguard/socketproxy"
 )
 
 var (
@@ -23,9 +23,9 @@ func init() {
 }
 
 func main() {
-	filename := flag.String("filename", "docker-safety.sock", "The socket to create")
+	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
-	owner := flag.String("owner", "", "The string to use as the container owner")
+	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	flag.Parse()
 
@@ -34,7 +34,7 @@ func main() {
 	}
 
 	if *owner == "" {
-		*owner = fmt.Sprintf("safetysock-%d", os.Getpid())
+		*owner = fmt.Sprintf("sockguard-pid-%d", os.Getpid())
 	}
 
 	var allowBinds []string

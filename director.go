@@ -16,7 +16,7 @@ import (
 
 const (
 	apiVersion = "1.32"
-	ownerKey   = "com.buildkite.safety-sock.owner"
+	ownerKey   = "com.buildkite.sockguard.owner"
 )
 
 var (
@@ -213,7 +213,6 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 
 		// prevent privileged mode
 		privileged, ok := decoded["HostConfig"].(map[string]interface{})["Privileged"].(bool)
-
 		if ok && privileged {
 			l.Printf("Denied privileged on container create")
 			writeError(w, "Containers aren't allowed to run as privileged", http.StatusUnauthorized)
@@ -221,20 +220,20 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 		}
 
 		// filter binds, don't allow host binds
-		binds := decoded["HostConfig"].(map[string]interface{})["Binds"].([]interface{})
-
-		for _, bind := range binds {
-			if !isBindAllowed(bind.(string), r.AllowBinds) {
-				l.Printf("Denied host bind %q", bind)
-				writeError(w, "Host binds aren't allowed", http.StatusUnauthorized)
-				return
+		binds, ok := decoded["HostConfig"].(map[string]interface{})["Binds"].([]interface{})
+		if ok {
+			for _, bind := range binds {
+				if !isBindAllowed(bind.(string), r.AllowBinds) {
+					l.Printf("Denied host bind %q", bind)
+					writeError(w, "Host binds aren't allowed", http.StatusUnauthorized)
+					return
+				}
 			}
 		}
 
 		// prevent host and container network mode
-		networkMode := decoded["HostConfig"].(map[string]interface{})["NetworkMode"].(string)
-
-		if networkMode == "host" {
+		networkMode, ok := decoded["HostConfig"].(map[string]interface{})["NetworkMode"].(string)
+		if ok && networkMode == "host" {
 			l.Printf("Denied host network mode on container create")
 			writeError(w, "Containers aren't allowed to use host networking", http.StatusUnauthorized)
 			return
@@ -267,7 +266,7 @@ func isBindAllowed(bind string, allowed []string) bool {
 		hostSrc := filepath.FromSlash(path.Clean("/" + chunks[0]))
 
 		for _, allowedPath := range allowed {
-			if rel, _ := filepath.Rel(allowedPath, hostSrc); rel == "." {
+			if strings.HasPrefix(hostSrc, allowedPath) {
 				return true
 			}
 		}

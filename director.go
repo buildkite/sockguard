@@ -212,9 +212,9 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 		l.Printf("Labels: %#v", decoded["Labels"])
 
 		// prevent privileged mode
-		privileged := decoded["HostConfig"].(map[string]interface{})["Privileged"].(bool)
+		privileged, ok := decoded["HostConfig"].(map[string]interface{})["Privileged"].(bool)
 
-		if privileged {
+		if ok && privileged {
 			l.Printf("Denied privileged on container create")
 			writeError(w, "Containers aren't allowed to run as privileged", http.StatusUnauthorized)
 			return

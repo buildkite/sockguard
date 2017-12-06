@@ -1,6 +1,6 @@
 # Sockguard
 
-Safely providing access to a docker daemon to untrusted containers is challenging. By design docker doesn't provide any sort of access control over what can be done over that socket, so anything which has the socket has the same influence over your system as the user that docker is running as. This includes the host filesystem via mounts. To compound this, the default configuration of most docker installations has docker running with root privileges.
+Safely providing access to a docker daemon to untrusted containers is [challenging](https://docs.docker.com/engine/security/https/). By design docker doesn't provide any sort of access control over what can be done over that socket, so anything which has the socket has the same influence over your system as the user that docker is running as. This includes the host filesystem via mounts. To compound this, the default configuration of most docker installations has docker running with root privileges.
 
 In a CI environment, builds need to be able to create containers, networks and volumes with access to a limit set of filesystem directories on the host. They need to have access to the resources they create and be able to destroy them as makes sense in the build.
 

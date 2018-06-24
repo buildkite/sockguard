@@ -39,70 +39,70 @@ Based off https://docs.docker.com/engine/api/v1.32.
 
 ### Containers (Done)
 
-- [*] GET /containers/json (filtered)
-- [*] POST /containers/create (label added)
-- [*] GET /containers/{id}/json (ownership check)
-- [*] GET /containers/{id}/top (ownership check)
-- [*] GET /containers/{id}/logs (ownership check)
-- [*] GET /containers/{id}/changes (ownership check)
-- [*] GET /containers/{id}/export (ownership check)
-- [*] GET /containers/{id}/stats (ownership check)
-- [*] POST /containers/{id}/resize (ownership check)
-- [*] POST /containers/{id}/start (ownership check)
-- [*] POST /containers/{id}/stop (ownership check)
-- [*] POST /containers/{id}/restart (ownership check)
-- [*] POST /containers/{id}/kill (ownership check)
-- [*] POST /containers/{id}/update (ownership check)
-- [*] POST /containers/{id}/rename (ownership check)
-- [*] POST /containers/{id}/pause (ownership check)
-- [*] POST /containers/{id}/unpause (ownership check)
-- [*] POST /containers/{id}/attach (ownership check)
-- [*] GET /containers/{id}/attach/ws (ownership check)
-- [*] POST /containers/{id}/wait (ownership check)
-- [*] DELETE /containers/{id} (ownership check)
-- [*] HEAD /containers/{id}/archive (ownership check)
-- [*] GET /containers/{id}/archive (ownership check)
-- [*] PUT /containers/{id}/archive (ownership check)
-- [*] POST /containers/{id}/exec (ownership check)
-- [*] POST /containers/prune (filtered)
-- [*] POST /exec/{id}/start
-- [*] POST /exec/{id}/resize
-- [*] GET /exec/{id}/json
+- [x] GET /containers/json (filtered)
+- [x] POST /containers/create (label added)
+- [x] GET /containers/{id}/json (ownership check)
+- [x] GET /containers/{id}/top (ownership check)
+- [x] GET /containers/{id}/logs (ownership check)
+- [x] GET /containers/{id}/changes (ownership check)
+- [x] GET /containers/{id}/export (ownership check)
+- [x] GET /containers/{id}/stats (ownership check)
+- [x] POST /containers/{id}/resize (ownership check)
+- [x] POST /containers/{id}/start (ownership check)
+- [x] POST /containers/{id}/stop (ownership check)
+- [x] POST /containers/{id}/restart (ownership check)
+- [x] POST /containers/{id}/kill (ownership check)
+- [x] POST /containers/{id}/update (ownership check)
+- [x] POST /containers/{id}/rename (ownership check)
+- [x] POST /containers/{id}/pause (ownership check)
+- [x] POST /containers/{id}/unpause (ownership check)
+- [x] POST /containers/{id}/attach (ownership check)
+- [x] GET /containers/{id}/attach/ws (ownership check)
+- [x] POST /containers/{id}/wait (ownership check)
+- [x] DELETE /containers/{id} (ownership check)
+- [x] HEAD /containers/{id}/archive (ownership check)
+- [x] GET /containers/{id}/archive (ownership check)
+- [x] PUT /containers/{id}/archive (ownership check)
+- [x] POST /containers/{id}/exec (ownership check)
+- [x] POST /containers/prune (filtered)
+- [x] POST /exec/{id}/start
+- [x] POST /exec/{id}/resize
+- [x] GET /exec/{id}/json
 
 ### Images (Partial)
 
-- [*] GET /images/json (filtered)
-- [*] POST /build (label added)
-- [*] POST /build/prune  (filtered)
+- [x] GET /images/json (filtered)
+- [x] POST /build (label added)
+- [x] POST /build/prune  (filtered)
 - [ ] POST /images/create
-- [*] GET /images/{name}/json
-- [*] GET /images/{name}/history
-- [*] PUSH /images/{name}/push
-- [*] POST  /images/{name}/tag
-- [*] REMOVE /images/{name}
+- [x] GET /images/{name}/json
+- [x] GET /images/{name}/history
+- [x] PUSH /images/{name}/push
+- [x] POST  /images/{name}/tag
+- [x] REMOVE /images/{name}
 - [ ] GET /images/search
-- [*] POST /images/prune
+- [x] POST /images/prune
 - [ ] POST /commit
-- [*] POST /images/{name}/get
+- [x] POST /images/{name}/get
 - [ ] GET /images/get
 - [ ] POST /images/load
 
 ### Networks (Done)
 
-- [*] GET /networks
-- [*] GET /networks/{id}
-- [*] POST /networks/create
-- [*] POST /networks/{id}/connect
-- [*] POST /networks/{id}/disconnect
-- [*] POST /networks/prune
+- [x] GET /networks
+- [x] GET /networks/{id}
+- [x] POST /networks/create
+- [x] POST /networks/{id}/connect
+- [x] POST /networks/{id}/disconnect
+- [x] POST /networks/prune
 
 ### Volumes
 
-- [*] GET /volumes
-- [*] POST /volumes/create
-- [*] GET /volumes/{name}
-- [*] DELETE /volumes/{name}
-- [()] POST /volumes/prune
+- [x] GET /volumes
+- [x] POST /volumes/create
+- [x] GET /volumes/{name}
+- [x] DELETE /volumes/{name}
+- [x] POST /volumes/prune
 
 ### Swarm (Disabled)
 
@@ -148,9 +148,9 @@ Based off https://docs.docker.com/engine/api/v1.32.
 ### System
 
 - [ ] POST /auth
-- [*] POST /info
+- [x] POST /info
 - [ ] GET /version
-- [*] GET /_ping (direct)
+- [x] GET /_ping (direct)
 - [ ] GET /events
 - [ ] GET /system/df
 - [ ] GET /distribution/{name}/json

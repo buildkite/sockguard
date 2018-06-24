@@ -1,0 +1,4 @@
+# Default pipeline from cli
+steps:
+- label: Example Test
+  command: echo "Hello!"

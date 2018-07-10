@@ -24,9 +24,10 @@ var (
 )
 
 type rulesDirector struct {
-	Client     *http.Client
-	Owner      string
-	AllowBinds []string
+	Client                  *http.Client
+	Owner                   string
+	AllowBinds              []string
+	AllowHostModeNetworking bool
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {
@@ -233,7 +234,7 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 
 		// prevent host and container network mode
 		networkMode, ok := decoded["HostConfig"].(map[string]interface{})["NetworkMode"].(string)
-		if ok && networkMode == "host" {
+		if ok && networkMode == "host" && (!r.AllowHostModeNetworking) {
 			l.Printf("Denied host network mode on container create")
 			writeError(w, "Containers aren't allowed to use host networking", http.StatusUnauthorized)
 			return

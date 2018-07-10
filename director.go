@@ -59,7 +59,10 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	}
 
 	switch {
+	// System related endpoints
 	case match(`GET`, `^/(_ping|version|info)$`):
+		return upstream
+	case match(`POST`, `^/auth$`):
 		return upstream
 
 	// Container related endpoints

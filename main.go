@@ -27,6 +27,7 @@ func main() {
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
+	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
 	flag.Parse()
 
 	if debug {
@@ -44,8 +45,9 @@ func main() {
 	}
 
 	proxy := socketproxy.New(*upstream, &rulesDirector{
-		AllowBinds: allowBinds,
-		Owner:      *owner,
+		AllowBinds:              allowBinds,
+		AllowHostModeNetworking: *allowHostModeNetworking,
+		Owner: *owner,
 		Client: &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {

@@ -151,7 +151,7 @@ Based off https://docs.docker.com/engine/api/v1.32.
 - [x] POST /info
 - [ ] GET /version
 - [x] GET /_ping (direct)
-- [ ] GET /events
+- [x] GET /events
 - [ ] GET /system/df
 - [ ] GET /distribution/{name}/json
 - [ ] POST /session

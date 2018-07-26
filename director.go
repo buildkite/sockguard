@@ -247,12 +247,15 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 		// apply CgroupParent if enabled
 		if r.ContainerCgroupParent != "" {
 			// If a CgroupParent is already specified, bug out
-			if decoded["CgroupParent"] != "" {
-				l.Printf("Denied container create due to existing CgroupParent '%s' (override not permitted)", decoded["CgroupParent"])
-				writeError(w, fmt.Sprintf("Cannot override CgroupParent value '%s' on container create", decoded["CgroupParent"]), http.StatusUnauthorized)
-				return
+			cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
+			if ok {
+				if cgroupParent != "" {
+					l.Printf("Denied container create due to existing CgroupParent '%s' (override not permitted)", cgroupParent)
+					writeError(w, fmt.Sprintf("Cannot override CgroupParent value '%s' on container create", cgroupParent), http.StatusUnauthorized)
+					return
+				}
+				decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
 			}
-			decoded["CgroupParent"] = r.ContainerCgroupParent
 		}
 
 		encoded, err := json.Marshal(decoded)

@@ -9,7 +9,7 @@ services:
   dcp:
     build:
       context: .
-    command: /sockguard -set-cgroup-parent this-container
+    command: /sockguard -filename /var/run/docker/sockguard.sock -set-cgroup-parent this-container
     cgroup_parent: test-cgroup
     volumes:
       - "docker-socket-vol:/var/run/docker/"

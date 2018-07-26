@@ -17,9 +17,9 @@ func TestGetRequestOverSocketProxy(t *testing.T) {
 	}))
 	defer close1()
 
-	proxy := socketproxy.New(upstreamSock, func(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+	proxy := socketproxy.New(upstreamSock, socketproxy.DirectorFunc(func(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 		return upstream
-	})
+	}))
 
 	proxySock, close2 := startSocketServer(t, proxy)
 	defer close2()

@@ -30,9 +30,17 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
-// Director is a function that returns an http.Handler that either passes through to
+// Director returns an http.Handler that either passes through to
 // an upstream handler or imposes some logic of it's own on the request.
-type Director func(l Logger, req *http.Request, upstream http.Handler) http.Handler
+type Director interface {
+	Direct(l Logger, req *http.Request, upstream http.Handler) http.Handler
+}
+
+type DirectorFunc func(l Logger, req *http.Request, upstream http.Handler) http.Handler
+
+func (d DirectorFunc) Direct(l Logger, req *http.Request, upstream http.Handler) http.Handler {
+	return d(l, req, upstream)
+}
 
 // New returns a SocketProxy that proxies requests to the provided upstream unix socket
 func New(upstream string, director Director) *SocketProxy {
@@ -57,7 +65,7 @@ func (s *SocketProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		s.ServeViaUpstreamSocket(l, w, req)
 	})
 
-	s.director(l, req, passUpstream).ServeHTTP(w, req)
+	s.director.Direct(l, req, passUpstream).ServeHTTP(w, req)
 }
 
 func (s *SocketProxy) ServeViaUpstreamSocket(l *log.Logger, w http.ResponseWriter, req *http.Request) {

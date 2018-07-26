@@ -1,0 +1,16 @@
+steps:
+  - label: ":golang:"
+    plugins:
+      golang-cross-compile#v1.0.0:
+        build: "."
+        import: github.com/buildkite/sockguard
+        targets:
+          - version: 1.10.2
+            goos: linux
+            goarch: amd64
+          - version: 1.10.2
+            goos: windows
+            goarch: amd64
+          - version: 1.10.2
+            goos: darwin
+            goarch: amd64

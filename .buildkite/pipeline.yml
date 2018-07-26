@@ -1,5 +1,6 @@
 steps:
-  - plugins:
+  - label: ":golang:"
+    plugins:
       golang-cross-compile#v1.0.0:
         build: "*.go"
         import: github.com/buildkite/sockguard

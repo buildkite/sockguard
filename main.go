@@ -11,7 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/buildkite/sockguard/socketproxy"
+	"github.com/CpuID/sockguard/socketproxy"
 )
 
 var (
@@ -28,6 +28,7 @@ func main() {
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
+	setCgroupParent := flag.String("set-cgroup-parent", "", "Set CgroupParent. Arbitrary string or 'this-container' to match the CgroupParent of the container running this process")
 	flag.Parse()
 
 	if debug {
@@ -44,9 +45,24 @@ func main() {
 		allowBinds = []string{*allowBind}
 	}
 
+	var cgroupParentValue string
+	var err error
+	// 2 options:
+	// - this-container = detect the CgroupParent of the container running this process
+	// - custom string = passthrough arbitrary value for CgroupParent
+	if *setCgroupParent == "this-container" {
+		cgroupParentValue, err = thisContainerCgroupParent(upstream)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else if *setCgroupParent != "" {
+		cgroupParentValue = *setCgroupParent
+	}
+
 	proxy := socketproxy.New(*upstream, &rulesDirector{
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
+		ContainerCgroupParent:   cgroupParentValue,
 		Owner: *owner,
 		Client: &http.Client{
 			Transport: &http.Transport{

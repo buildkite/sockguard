@@ -1,5 +1,13 @@
 steps:
-  - label: ":golang:"
+  - label: "🔎"
+    command: go test ./...
+    plugins:
+      golang#v2.0.0:
+        version: 1.10.2
+        import: github.com/buildkite/sockguard
+
+  - wait
+  - label: "🛠"
     plugins:
       golang-cross-compile#v1.0.0:
         build: "."

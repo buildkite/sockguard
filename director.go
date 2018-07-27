@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/buildkite/sockguard/socketproxy"
 )
 
 const (
@@ -40,7 +42,7 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 	})
 }
 
-func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	var match = func(method string, pattern string) bool {
 		if method != "*" && method != req.Method {
 			return false
@@ -163,7 +165,7 @@ var identifierPatterns = []*regexp.Regexp{
 
 // Check owner takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
 // got the correct owner label.
-func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
+func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
 	path := req.URL.Path
 	if versionRegex.MatchString(path) {
 		path = versionRegex.ReplaceAllString(path, "")
@@ -202,7 +204,7 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 	}
 }
 
-func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var decoded map[string]interface{}
 
@@ -305,7 +307,7 @@ func addLabel(label, value string, into interface{}) {
 	}
 }
 
-func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
 			addLabel(ownerKey, r.Owner, decoded["Labels"])
@@ -318,7 +320,7 @@ func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstre
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestFilters(req, func(filters map[string][]interface{}) {
 			label := ownerKey + "=" + r.Owner
@@ -341,7 +343,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.R
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringLabels(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToQueryStringLabels(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		l.Printf("Adding label %s=%s to querystring: %s %s",
 			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)

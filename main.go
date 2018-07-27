@@ -83,9 +83,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err = os.Chown(*filename, *socketUid, *socketGid); err != nil {
-		_ = listener.Close()
-		log.Fatal(err)
+	if *socketUid >= 0 && *socketGid >= 0 {
+		if err = os.Chown(*filename, *socketUid, *socketGid); err != nil {
+			_ = listener.Close()
+			log.Fatal(err)
+		}
 	}
 
 	if err = os.Chmod(*filename, os.FileMode(useSocketMode)); err != nil {

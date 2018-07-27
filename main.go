@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/CpuID/sockguard/socketproxy"
+	"github.com/buildkite/sockguard/socketproxy"
 )
 
 var (

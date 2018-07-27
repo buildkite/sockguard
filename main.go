@@ -57,7 +57,6 @@ func main() {
 			},
 		},
 	})
-
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {
 		log.Fatal(err)

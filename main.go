@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -82,15 +81,8 @@ func main() {
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
 		ContainerCgroupParent:   cgroupParentValue,
-		Owner: *owner,
-		Client: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					debugf("Dialing directly")
-					return net.Dial("unix", *upstream)
-				},
-			},
-		},
+		Owner:  *owner,
+		Client: dockerApiClient(upstream),
 	})
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {

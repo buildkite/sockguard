@@ -66,7 +66,6 @@ func main() {
 	}
 
 	var cgroupParentValue string
-	var err error
 	// 2 options:
 	// - this-container = detect the CgroupParent of the container running this process
 	// - custom string = passthrough arbitrary value for CgroupParent

@@ -25,9 +25,9 @@ func init() {
 
 func main() {
 	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
-	socketPerms := flag.String("sock-perms", "0600", "Permissions of the guarded socket")
-	socketUid := flag.Int("sock-uid", -1, "The UID (owner) of the guarded socket (defaults to -1 - process owner)")
-	socketGid := flag.Int("sock-gid", -1, "The GID (group) of the guarded socket (defaults to -1 - process group)")
+	socketMode := flag.String("mode", "0600", "Permissions of the guarded socket")
+	socketUid := flag.Int("uid", -1, "The UID (owner) of the guarded socket (defaults to -1 - process owner)")
+	socketGid := flag.Int("gid", -1, "The GID (group) of the guarded socket (defaults to -1 - process group)")
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/buildkite/sockguard/socketproxy"
@@ -24,6 +25,9 @@ func init() {
 
 func main() {
 	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
+	socketPerms := flag.String("sock-perms", "0600", "Permissions of the guarded socket")
+	socketUid := flag.Int("sock-uid", -1, "The UID (owner) of the guarded socket (defaults to -1 - process owner)")
+	socketGid := flag.Int("sock-gid", -1, "The GID (group) of the guarded socket (defaults to -1 - process group)")
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
@@ -32,6 +36,22 @@ func main() {
 
 	if debug {
 		socketproxy.Debug = true
+	}
+
+	if *socketUid == -1 {
+		// Default to the process UID
+		sockUid := os.Getuid()
+		socketUid = &sockUid
+	}
+	if *socketGid == -1 {
+		// Default to the process GID
+		sockGid := os.Getgid()
+		socketGid = &sockGid
+	}
+
+	useSocketPerms, err := strconv.ParseUint(*socketPerms, 0, 32)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	if *owner == "" {
@@ -63,11 +83,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err = os.Chmod(*filename, 0600); err != nil {
+	if err = os.Chown(*filename, *socketUid, *socketGid); err != nil {
+		_ = listener.Close()
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Listening on %s, upstream is %s\n", *filename, *upstream)
+	if err = os.Chmod(*filename, os.FileMode(useSocketPerms)); err != nil {
+		_ = listener.Close()
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Listening on %s (socket UID %d GID %d permissions %s), upstream is %s\n", *filename, *socketUid, *socketGid, *socketPerms, *upstream)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, os.Kill, syscall.SIGTERM)

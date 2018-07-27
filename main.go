@@ -49,7 +49,7 @@ func main() {
 		socketGid = &sockGid
 	}
 
-	useSocketPerms, err := strconv.ParseUint(*socketPerms, 0, 32)
+	useSocketMode, err := strconv.ParseUint(*socketMode, 0, 32)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,12 +88,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err = os.Chmod(*filename, os.FileMode(useSocketPerms)); err != nil {
+	if err = os.Chmod(*filename, os.FileMode(useSocketMode)); err != nil {
 		_ = listener.Close()
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Listening on %s (socket UID %d GID %d permissions %s), upstream is %s\n", *filename, *socketUid, *socketGid, *socketPerms, *upstream)
+	fmt.Printf("Listening on %s (socket UID %d GID %d permissions %s), upstream is %s\n", *filename, *socketUid, *socketGid, *socketMode, *upstream)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, os.Kill, syscall.SIGTERM)

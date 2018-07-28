@@ -48,7 +48,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		*labelValue = &useLabelValue
+		*labelValue = useLabelValue
 	} else if *labelValue == "" {
 		*labelValue = fmt.Sprintf("sockguard-pid-%d", os.Getpid())
 	}

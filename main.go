@@ -31,7 +31,8 @@ func main() {
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
-	setCgroupParent := flag.String("set-cgroup-parent", "", "Set CgroupParent. Arbitrary string or 'this-container' to match the CgroupParent of the container running this process")
+	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value. Cannot be used with --inherit-cgroup-parent")
+	inheritCgroupParent := flag.Bool("inherit-cgroup-parent", false, "Set CgroupParent on new containers to match the CgroupParent of the container running this process")
 	flag.Parse()
 
 	if debug {
@@ -64,17 +65,20 @@ func main() {
 		allowBinds = []string{*allowBind}
 	}
 
+	if *cgroupParent != "" && *inheritCgroupParent == true {
+		log.Fatal("--cgroup-parent and --inherit-cgroup-parent cannot be used together. Pick one")
+	}
 	var cgroupParentValue string
-	// 2 options:
-	// - this-container = detect the CgroupParent of the container running this process
-	// - custom string = passthrough arbitrary value for CgroupParent
-	if *setCgroupParent == "this-container" {
+	if *inheritCgroupParent {
 		cgroupParentValue, err = thisContainerCgroupParent(upstream)
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else if *setCgroupParent != "" {
-		cgroupParentValue = *setCgroupParent
+	} else if *cgroupParent != "" {
+		cgroupParentValue = *cgroupParent
+	}
+	if cgroupParentValue != "" {
+		debugf("Setting CgroupParent on new containers to '%s'", cgroupParentValue)
 	}
 
 	proxy := socketproxy.New(*upstream, &rulesDirector{

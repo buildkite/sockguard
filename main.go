@@ -25,7 +25,10 @@ func init() {
 func main() {
 	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
 	upstream := flag.String("upstream-socket", "/var/run/docker.sock", "The path to the original docker socket")
-	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
+	owner := flag.String("owner-label", "", "(DEPRECATED) Use --label-value")
+	labelName := flag.String("label-name", "com.buildkite.sockguard.owner", "Label name to apply/filter for Docker daemon calls, defaults to 'com.buildkite.sockguard.owner'")
+	labelValue := flag.String("label-value", "", "The label value to use, defaults to 'sockguard-pid-#' (# as the process id)")
+	labelValueAsCgroupParent := flag.Bool("label-value-cgroup-parent", false, "Use the CgroupParent value as the label value")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
 	flag.Parse()
@@ -34,8 +37,20 @@ func main() {
 		socketproxy.Debug = true
 	}
 
-	if *owner == "" {
-		*owner = fmt.Sprintf("sockguard-pid-%d", os.Getpid())
+	if *owner != "" {
+		log.Fatal("--owner-label is deprecated, use --label-value instead")
+	}
+	if *labelValue != "" && *labelValueAsCgroupParent {
+		log.Fatal("--label-value and --label-value-cgroup-parent cannot be used together. Pick one")
+	}
+	if *labelValueAsCgroupParent {
+		useLabelValue, err := thisContainerCgroupParent(upstream)
+		if err != nil {
+			log.Fatal(err)
+		}
+		*labelValue = &useLabelValue
+	} else if *labelValue == "" {
+		*labelValue = fmt.Sprintf("sockguard-pid-%d", os.Getpid())
 	}
 
 	var allowBinds []string
@@ -47,7 +62,8 @@ func main() {
 	proxy := socketproxy.New(*upstream, &rulesDirector{
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
-		Owner: *owner,
+		LabelName:               *labelName,
+		LabelValue:              *labelValue,
 		Client: &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {

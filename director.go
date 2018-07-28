@@ -16,7 +16,6 @@ import (
 
 const (
 	apiVersion = "1.32"
-	ownerKey   = "com.buildkite.sockguard.owner"
 )
 
 var (
@@ -25,7 +24,8 @@ var (
 
 type rulesDirector struct {
 	Client                  *http.Client
-	Owner                   string
+	LabelName               string
+	LabelValue              string
 	AllowBinds              []string
 	AllowHostModeNetworking bool
 }
@@ -73,7 +73,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	case match(`GET`, `^/containers/json$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
 	case match(`*`, `^/(containers|exec)/(\w+)\b`):
-		if ok, err := r.checkOwner(l, "containers", false, req); ok {
+		if ok, err := r.checkLabel(l, "containers", false, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
 			l.Printf("Container not found, allowing")
@@ -97,7 +97,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	case match(`POST`, `^/images/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
 	case match(`*`, `^/images/(\w+)\b`):
-		if ok, err := r.checkOwner(l, "images", true, req); ok {
+		if ok, err := r.checkLabel(l, "images", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
 			l.Printf("Image not found, allowing")
@@ -117,7 +117,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	case match(`GET`, `^/networks/(\w+)$`),
 		match(`DELETE`, `^/networks/(\w+)$`),
 		match(`POST`, `^/networks/(\w+)/(connect|disconnect)$`):
-		if ok, err := r.checkOwner(l, "networks", true, req); ok {
+		if ok, err := r.checkLabel(l, "networks", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
 			l.Printf("Network not found, allowing")
@@ -135,7 +135,7 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 	case match(`POST`, `^/volumes/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
 	case match(`GET`, `^/volumes/(\w+)$`), match(`DELETE`, `^/volumes/(\w+)$`):
-		if ok, err := r.checkOwner(l, "volumes", true, req); ok {
+		if ok, err := r.checkLabel(l, "volumes", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
 			l.Printf("Volume not found, allowing")
@@ -159,9 +159,9 @@ var identifierPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/images/(\w+/[^/]+)$`),
 }
 
-// Check owner takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
-// got the correct owner label.
-func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
+// Check label takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
+// got the correct label name/value.
+func (r *rulesDirector) checkLabel(l *log.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
 	path := req.URL.Path
 	if versionRegex.MatchString(path) {
 		path = versionRegex.ReplaceAllString(path, "")
@@ -188,14 +188,14 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 
 	l.Printf("Labels for %s: %v", path, labels)
 
-	if val, exists := labels[ownerKey]; exists && val == r.Owner {
-		l.Printf("Allow, %s matches owner %q", path, r.Owner)
+	if val, exists := labels[r.LabelName]; exists && val == r.LabelValue {
+		l.Printf("Allow, %s matches %q=%q", path, r.LabelName, r.LabelValue)
 		return true, nil
 	} else if !exists && allowEmpty {
-		l.Printf("Allow, %s has no owner", path)
+		l.Printf("Allow, %s has no %q label", path, r.LabelName)
 		return true, nil
 	} else {
-		l.Printf("Deny, %s has owner %q, wanted %q", path, val, r.Owner)
+		l.Printf("Deny, %s has %q label %q, wanted %q", path, r.LabelName, val, r.LabelValue)
 		return false, nil
 	}
 }
@@ -210,7 +210,7 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 		}
 
 		// first we add our labels
-		addLabel(ownerKey, r.Owner, decoded["Labels"])
+		addLabel(r.LabelName, r.LabelValue, decoded["Labels"])
 
 		l.Printf("Labels: %#v", decoded["Labels"])
 
@@ -292,7 +292,7 @@ func addLabel(label, value string, into interface{}) {
 func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
-			addLabel(ownerKey, r.Owner, decoded["Labels"])
+			addLabel(r.LabelName, r.LabelValue, decoded["Labels"])
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -305,12 +305,12 @@ func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstre
 func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestFilters(req, func(filters map[string][]interface{}) {
-			label := ownerKey + "=" + r.Owner
+			label := r.LabelName + "=" + r.LabelValue
 			l.Printf("Adding label %v to label filters %v", label, filters["label"])
 			filters["label"] = []interface{}{label}
 			for _, val := range filters["label"] {
 				if valString, ok := val.(string); ok {
-					if valString != ownerKey && !strings.HasPrefix(valString, ownerKey+"=") {
+					if valString != r.LabelName && !strings.HasPrefix(valString, r.LabelName+"=") {
 						filters["label"] = append(filters["label"], valString)
 					}
 				}
@@ -328,7 +328,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.R
 func (r *rulesDirector) addLabelsToQueryStringLabels(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		l.Printf("Adding label %s=%s to querystring: %s %s",
-			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)
+			r.LabelName, r.LabelValue, req.URL.Path, req.URL.RawQuery)
 
 		var q = req.URL.Query()
 		var labels = map[string]string{}
@@ -340,7 +340,7 @@ func (r *rulesDirector) addLabelsToQueryStringLabels(l *log.Logger, req *http.Re
 			}
 		}
 
-		labels[ownerKey] = r.Owner
+		labels[r.LabelName] = r.LabelValue
 
 		encoded, err := json.Marshal(labels)
 		if err != nil {

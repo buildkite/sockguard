@@ -18,7 +18,7 @@ import (
 
 const (
 	apiVersion = "1.32"
-	ownerKey   = "com.buildkite.sockguard.owner"
+	ownerKey   = "sockguard.owner"
 )
 
 var (

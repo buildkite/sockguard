@@ -30,8 +30,7 @@ type rulesDirector struct {
 	Owner                   string
 	AllowBinds              []string
 	AllowHostModeNetworking bool
-	// If "", ignored (passthrough defaults)
-	ContainerCgroupParent string
+	ContainerCgroupParent   string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {

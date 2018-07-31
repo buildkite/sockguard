@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -31,8 +32,7 @@ func main() {
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
-	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value. Cannot be used with --inherit-cgroup-parent")
-	inheritCgroupParent := flag.Bool("inherit-cgroup-parent", false, "Set CgroupParent on new containers to match the CgroupParent of the container running this process")
+	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value on new containers")
 	flag.Parse()
 
 	if debug {
@@ -65,28 +65,23 @@ func main() {
 		allowBinds = []string{*allowBind}
 	}
 
-	if *cgroupParent != "" && *inheritCgroupParent == true {
-		log.Fatal("--cgroup-parent and --inherit-cgroup-parent cannot be used together. Pick one")
-	}
-	var cgroupParentValue string
-	if *inheritCgroupParent {
-		cgroupParentValue, err = thisContainerCgroupParent(upstream)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else if *cgroupParent != "" {
-		cgroupParentValue = *cgroupParent
-	}
-	if cgroupParentValue != "" {
-		debugf("Setting CgroupParent on new containers to '%s'", cgroupParentValue)
+	if *cgroupParent != "" {
+		debugf("Setting CgroupParent on new containers to '%s'", *cgroupParent)
 	}
 
 	proxy := socketproxy.New(*upstream, &rulesDirector{
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
-		ContainerCgroupParent:   cgroupParentValue,
-		Owner:  *owner,
-		Client: dockerApiClient(upstream),
+		ContainerCgroupParent:   *cgroupParent,
+		Owner: *owner,
+		Client: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					debugf("Dialing directly")
+					return net.Dial("unix", *upstream)
+				},
+			},
+		},
 	})
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {

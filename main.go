@@ -32,6 +32,7 @@ func main() {
 	owner := flag.String("owner-label", "", "The value to use as the owner of the socket, defaults to the process id")
 	allowBind := flag.String("allow-bind", "", "A path to allow host binds to occur under")
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
+	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value on new containers")
 	flag.Parse()
 
 	if debug {
@@ -64,9 +65,14 @@ func main() {
 		allowBinds = []string{*allowBind}
 	}
 
+	if *cgroupParent != "" {
+		debugf("Setting CgroupParent on new containers to '%s'", *cgroupParent)
+	}
+
 	proxy := socketproxy.New(*upstream, &rulesDirector{
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
+		ContainerCgroupParent:   *cgroupParent,
 		Owner: *owner,
 		Client: &http.Client{
 			Transport: &http.Transport{

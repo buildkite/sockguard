@@ -30,6 +30,7 @@ type rulesDirector struct {
 	Owner                   string
 	AllowBinds              []string
 	AllowHostModeNetworking bool
+	ContainerCgroupParent   string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {
@@ -242,6 +243,20 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 			l.Printf("Denied host network mode on container create")
 			writeError(w, "Containers aren't allowed to use host networking", http.StatusUnauthorized)
 			return
+		}
+
+		// apply CgroupParent if enabled
+		if r.ContainerCgroupParent != "" {
+			// If a CgroupParent is already specified, bug out
+			cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
+			if ok {
+				if cgroupParent != "" {
+					l.Printf("Denied container create due to existing CgroupParent '%s' (override not permitted)", cgroupParent)
+					writeError(w, fmt.Sprintf("Cannot override CgroupParent value '%s' on container create", cgroupParent), http.StatusUnauthorized)
+					return
+				}
+				decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
+			}
 		}
 
 		encoded, err := json.Marshal(decoded)

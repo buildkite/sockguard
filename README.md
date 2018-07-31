@@ -25,7 +25,7 @@ In addition, creation of containers imposes certain restrictions to ensure that 
 * By default no host bind mounts are allowed, but certain paths can be white-listed with `--allow-bind`
 * No `host` network mode is allowed
 
-There is also an option to set `cgroup-parent` on container creation. Either a custom value or `this-container` can be used to specify lookup the `cgroup-parent` of the container running this process instead. This is useful for restricting CPU/Memory resources of containers spawned via this proxy (eg. when using a container scheduler).
+There is also an option to set `cgroup-parent` on container creation. This is useful for restricting CPU/Memory resources of containers spawned via this proxy (eg. when using a container scheduler).
 
 ## How is this solved elsewhere?
 

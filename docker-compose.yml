@@ -10,7 +10,7 @@ services:
       context: ./ci_agent_dev
     volumes:
       - "docker-socket-vol:/var/run/docker/"
-  dcp:
+  sockguard:
     build:
       context: .
     command: /sockguard -filename /var/run/docker/sockguard.sock -set-cgroup-parent this-container

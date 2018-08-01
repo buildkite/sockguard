@@ -206,7 +206,8 @@ fi
 trap 'echo "SIGTERM received, initiate shutdown."; kill -INT $PID; sleep 1' SIGINT SIGTERM
 
 # Start sockguard in the background, logging to stdout/stderr.
-full_command="/sockguard -filename /var/run/docker/sockguard.sock -cgroup-parent '${cgroup_parent}' -uid 0 -gid 10000 -mode 0660 -owner-label '${cgroup_parent}' >/dev/stdout 2>&1 &"
+# TODO: adjust your other args here
+full_command="/sockguard -cgroup-parent '${cgroup_parent}' -owner-label '${cgroup_parent}' ...other args... >/dev/stdout 2>&1 &"
 echo "$(date) : sockguard command: ${full_command}"
 eval "${full_command}"
 PID=$!

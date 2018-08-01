@@ -1,3 +1,7 @@
+# This file validates how you might use sockguard as a sidecar container to some CI worker/agent,
+# including the (non-trivial) socket volume mapping. This is required due to the chicken-and-egg
+# of creating the socket before the volume otherwise.
+
 version: '2'
 
 services:

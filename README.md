@@ -166,3 +166,49 @@ Based off https://docs.docker.com/engine/api/v1.32.
 - [ ] DELETE /configs/{id}
 - [ ] POST /configs/{id}/update
 
+## `CgroupParent` in Amazon ECS (Example)
+
+Let's say you are spawning a `sockguard` instance per ECS task, to pass through a guarded Docker socker to some worker (eg. a CI worker). You may want to apply the same CPU/Memory constraints as the ECS task. This can be done via a bash wrapper to `/sockguard` in a sidecar container (ensure you have `bash`, `curl` and `jq` available):
+
+```
+#!/bin/bash
+
+###########################
+
+# Detect CgroupParent first
+
+# A) Use the container ID from /proc/self/cgroup
+# (note: this works fine on a systemd based system, need to adjust the grep on pre-systemd? fine for us right now)
+container_id=$(cat /proc/self/cgroup | grep "1:name=systemd" | rev | cut -d/ -f1 | rev)
+
+# B) Use the hostname
+# (note: works, as long as someone doesnt start the container with --hostname. A) preferred for now)
+# container_id="$HOSTNAME"
+
+if [ -z "$container_id" ]; then
+  echo "sockguard/start.sh: container_id empty?"
+  exit 1
+fi
+
+# Get the CgroupParent via the Docker API
+container_inspect_url="http:/v1.37/containers/${container_id}/json"
+cgroup_parent=$(curl -s --unix-socket /var/run/docker.sock "$container_inspect_url" | jq -r .HostConfig.CgroupParent)
+
+if [ -z "$cgroup_parent" ]; then
+  echo "sockguard/start.sh: cgroup_parent empty? (from Docker API)"
+  exit 1
+fi
+
+###########################
+
+# Handle SIGTERM correctly
+# Sleep 1 second to allow a graceful shutdown (because we can)
+trap 'echo "SIGTERM received, initiate shutdown."; kill -INT $PID; sleep 1' SIGINT SIGTERM
+
+# Start sockguard in the background, logging to stdout/stderr.
+full_command="/sockguard -filename /var/run/docker/sockguard.sock -cgroup-parent '${cgroup_parent}' -uid 0 -gid 10000 -mode 0660 -owner-label '${cgroup_parent}' >/dev/stdout 2>&1 &"
+echo "$(date) : sockguard command: ${full_command}"
+eval "${full_command}"
+PID=$!
+wait $PID
+```

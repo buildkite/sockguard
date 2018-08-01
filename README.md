@@ -203,15 +203,6 @@ fi
 
 ###########################
 
-# Handle SIGTERM correctly
-# Sleep 1 second to allow a graceful shutdown (because we can)
-trap 'echo "SIGTERM received, initiate shutdown."; kill -INT $PID; sleep 1' SIGINT SIGTERM
-
-# Start sockguard in the background, logging to stdout/stderr.
-# TODO: adjust your other args here
-full_command="/sockguard -cgroup-parent '${cgroup_parent}' -owner-label '${cgroup_parent}' ...other args... >/dev/stdout 2>&1 &"
-echo "$(date) : sockguard command: ${full_command}"
-eval "${full_command}"
-PID=$!
-wait $PID
+# Start sockguard with some args
+exec /sockguard -cgroup-parent '${cgroup_parent}' -owner-label '${cgroup_parent}' ...other args...
 ```

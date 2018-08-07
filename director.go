@@ -117,9 +117,9 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 		return r.addLabelsToBody(l, req, upstream)
 	case match(`POST`, `^/networks/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
-	case match(`GET`, `^/networks/(\w+)$`),
-		match(`DELETE`, `^/networks/(\w+)$`),
-		match(`POST`, `^/networks/(\w+)/(connect|disconnect)$`):
+	case match(`GET`, `^/networks/(.+)$`),
+		match(`DELETE`, `^/networks/(.+)$`),
+		match(`POST`, `^/networks/(.+)/(connect|disconnect)$`):
 		if ok, err := r.checkOwner(l, "networks", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {

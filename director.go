@@ -154,7 +154,7 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 }
 
 var identifierPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^/containers/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/containers/(.+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/networks/(\w+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/volumes/(\w+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/images/(.+?)/(?:json|history|push|tag)$`),

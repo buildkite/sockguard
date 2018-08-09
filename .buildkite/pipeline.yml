@@ -24,8 +24,8 @@ steps:
             goarch: amd64
 
   - wait
-    label: ":docker:"
+  - label: ":docker:"
     command: docker-compose build && docker-compose push
     branches: master
-    agent:
+    agents:
       queue: "deploy"

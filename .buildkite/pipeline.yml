@@ -22,3 +22,10 @@ steps:
           - version: 1.10.2
             goos: darwin
             goarch: amd64
+
+  - wait
+  - label: ":docker:"
+    command: docker-compose build && docker-compose push
+    branches: master
+    agents:
+      queue: "deploy"

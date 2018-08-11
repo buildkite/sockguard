@@ -25,6 +25,8 @@ In addition, creation of containers imposes certain restrictions to ensure that 
 * By default no host bind mounts are allowed, but certain paths can be white-listed with `--allow-bind`
 * No `host` network mode is allowed
 
+There is also an option to set `cgroup-parent` on container creation. This is useful for restricting CPU/Memory resources of containers spawned via this proxy (eg. when using a container scheduler).
+
 ## How is this solved elsewhere?
 
 Docker provides an ACL system in their Enterprise product, and also provides a plugin API with authorization hooks. At this stage the plugin eco-system is still pretty new. The advantage of using a local socket is that you can use filesystem permissions to control access to it.
@@ -164,3 +166,43 @@ Based off https://docs.docker.com/engine/api/v1.32.
 - [ ] DELETE /configs/{id}
 - [ ] POST /configs/{id}/update
 
+## Example: Running in Amazon ECS with CgroupParent
+
+Let's say you are spawning a `sockguard` instance per ECS task, to pass through a guarded Docker socker to some worker (eg. a CI worker). You may want to apply the same CPU/Memory constraints as the ECS task. This can be done via a bash wrapper to `/sockguard` in a sidecar container (ensure you have `bash`, `curl` and `jq` available):
+
+```
+#!/bin/bash
+
+set -euo pipefail
+
+###########################
+
+# Detect CgroupParent first
+
+# A) Use the container ID from /proc/self/cgroup
+# (note: this works fine on a systemd based system, need to adjust the grep on pre-systemd? fine for us right now)
+container_id=$(cat /proc/self/cgroup | grep "1:name=systemd" | rev | cut -d/ -f1 | rev)
+
+# B) Use the hostname
+# (note: works, as long as someone doesnt start the container with --hostname. A) preferred for now)
+# container_id="$HOSTNAME"
+
+if [ -z "$container_id" ]; then
+  echo "sockguard/start.sh: container_id empty?"
+  exit 1
+fi
+
+# Get the CgroupParent via the Docker API
+container_inspect_url="http:/v1.37/containers/${container_id}/json"
+cgroup_parent=$(curl -s --unix-socket /var/run/docker.sock "$container_inspect_url" | jq -r .HostConfig.CgroupParent)
+
+if [ -z "$cgroup_parent" ]; then
+  echo "sockguard/start.sh: cgroup_parent empty? (from Docker API)"
+  exit 1
+fi
+
+###########################
+
+# Start sockguard with some args
+exec /sockguard -cgroup-parent '${cgroup_parent}' -owner-label '${cgroup_parent}' ...other args...
+```

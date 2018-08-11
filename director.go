@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/buildkite/sockguard/socketproxy"
 )
 
 const (
@@ -28,6 +30,7 @@ type rulesDirector struct {
 	Owner                   string
 	AllowBinds              []string
 	AllowHostModeNetworking bool
+	ContainerCgroupParent   string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {
@@ -38,7 +41,7 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 	})
 }
 
-func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	var match = func(method string, pattern string) bool {
 		if method != "*" && method != req.Method {
 			return false
@@ -114,9 +117,9 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 		return r.addLabelsToBody(l, req, upstream)
 	case match(`POST`, `^/networks/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
-	case match(`GET`, `^/networks/(\w+)$`),
-		match(`DELETE`, `^/networks/(\w+)$`),
-		match(`POST`, `^/networks/(\w+)/(connect|disconnect)$`):
+	case match(`GET`, `^/networks/(.+)$`),
+		match(`DELETE`, `^/networks/(.+)$`),
+		match(`POST`, `^/networks/(.+)/(connect|disconnect)$`):
 		if ok, err := r.checkOwner(l, "networks", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
@@ -151,8 +154,8 @@ func (r *rulesDirector) Direct(l *log.Logger, req *http.Request, upstream http.H
 }
 
 var identifierPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^/containers/(\w+?)(?:/\w+)?$`),
-	regexp.MustCompile(`^/networks/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/containers/(.+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/networks/(.+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/volumes/(\w+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/images/(.+?)/(?:json|history|push|tag)$`),
 	regexp.MustCompile(`^/images/([^/]+)$`),
@@ -161,7 +164,7 @@ var identifierPatterns = []*regexp.Regexp{
 
 // Check owner takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
 // got the correct owner label.
-func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
+func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
 	path := req.URL.Path
 	if versionRegex.MatchString(path) {
 		path = versionRegex.ReplaceAllString(path, "")
@@ -200,7 +203,7 @@ func (r *rulesDirector) checkOwner(l *log.Logger, kind string, allowEmpty bool, 
 	}
 }
 
-func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var decoded map[string]interface{}
 
@@ -240,6 +243,20 @@ func (r *rulesDirector) handleContainerCreate(l *log.Logger, req *http.Request, 
 			l.Printf("Denied host network mode on container create")
 			writeError(w, "Containers aren't allowed to use host networking", http.StatusUnauthorized)
 			return
+		}
+
+		// apply CgroupParent if enabled
+		if r.ContainerCgroupParent != "" {
+			// If a CgroupParent is already specified, bug out
+			cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
+			if ok {
+				if cgroupParent != "" {
+					l.Printf("Denied container create due to existing CgroupParent '%s' (override not permitted)", cgroupParent)
+					writeError(w, fmt.Sprintf("Cannot override CgroupParent value '%s' on container create", cgroupParent), http.StatusUnauthorized)
+					return
+				}
+				decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
+			}
 		}
 
 		encoded, err := json.Marshal(decoded)
@@ -289,7 +306,7 @@ func addLabel(label, value string, into interface{}) {
 	}
 }
 
-func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
 			addLabel(ownerKey, r.Owner, decoded["Labels"])
@@ -302,7 +319,7 @@ func (r *rulesDirector) addLabelsToBody(l *log.Logger, req *http.Request, upstre
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestFilters(req, func(filters map[string][]interface{}) {
 			label := ownerKey + "=" + r.Owner
@@ -325,7 +342,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l *log.Logger, req *http.R
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringLabels(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) addLabelsToQueryStringLabels(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		l.Printf("Adding label %s=%s to querystring: %s %s",
 			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)

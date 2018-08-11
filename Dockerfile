@@ -1,18 +1,11 @@
-FROM golang:1.10.3-alpine3.8
+FROM golang:1.10-alpine as builder
+RUN apk add --no-cache ca-certificates
+WORKDIR /go/src/github.com/buildkite/sockguard
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -a -installsuffix cgo -ldflags="-w -s" -o /go/bin/sockguard
 
-RUN mkdir -p /go/src/app
-WORKDIR /go/src/app
-
-RUN apk add --no-cache git
-
-COPY *.go /go/src/app/
-
-RUN go get -d -v ./...
-RUN go install -v ./...
-
-# Single binary in the final image
-FROM alpine:3.8
-
-COPY --from=0 /go/bin/app /sockguard
-
-CMD [ "/sockguard" ]
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /go/bin/sockguard /sockguard
+ENTRYPOINT [ "/sockguard" ]

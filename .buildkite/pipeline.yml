@@ -1,0 +1,31 @@
+steps:
+  - label: "🔎"
+    command: go test ./...
+    plugins:
+      golang#v2.0.0:
+        version: 1.10.2
+        import: github.com/buildkite/sockguard
+
+  - wait
+  - label: "🛠"
+    plugins:
+      golang-cross-compile#v1.0.0:
+        build: "."
+        import: github.com/buildkite/sockguard
+        targets:
+          - version: 1.10.2
+            goos: linux
+            goarch: amd64
+          - version: 1.10.2
+            goos: windows
+            goarch: amd64
+          - version: 1.10.2
+            goos: darwin
+            goarch: amd64
+
+  - wait
+  - label: ":docker:"
+    command: docker-compose build && docker-compose push
+    branches: master
+    agents:
+      queue: "deploy"

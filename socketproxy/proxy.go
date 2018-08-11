@@ -25,10 +25,21 @@ type SocketProxy struct {
 	director Director
 }
 
-// Director is a function that chooses between the default proxy behaviour or it's own handler
-// depending on the content of an http.Request
+// Logger is a subset of log.Logger used in a Proxy request
+type Logger interface {
+	Printf(format string, v ...interface{})
+}
+
+// Director returns an http.Handler that either passes through to
+// an upstream handler or imposes some logic of it's own on the request.
 type Director interface {
-	Direct(l *log.Logger, req *http.Request, upstream http.Handler) http.Handler
+	Direct(l Logger, req *http.Request, upstream http.Handler) http.Handler
+}
+
+type DirectorFunc func(l Logger, req *http.Request, upstream http.Handler) http.Handler
+
+func (d DirectorFunc) Direct(l Logger, req *http.Request, upstream http.Handler) http.Handler {
+	return d(l, req, upstream)
 }
 
 // New returns a SocketProxy that proxies requests to the provided upstream unix socket

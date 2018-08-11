@@ -13,7 +13,8 @@ services:
   sockguard:
     build:
       context: ../../
-    command: /sockguard -filename /var/run/docker/sockguard.sock -cgroup-parent this-container
+      dockerfile: ./examples/cgroup_parent/Dockerfile
+    command: -filename /var/run/docker/sockguard.sock -cgroup-parent this-container
     cgroup_parent: test-cgroup
     volumes:
       - "docker-socket-vol:/var/run/docker/"

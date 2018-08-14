@@ -62,7 +62,7 @@ func main() {
 	var allowBinds []string
 
 	if *allowBind != "" {
-		allowBinds = []string{*allowBind}
+		allowBinds = strings.Split(*allowBind, ",")
 	}
 
 	if *cgroupParent != "" {

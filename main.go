@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/buildkite/sockguard/socketproxy"
@@ -73,7 +74,7 @@ func main() {
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
 		ContainerCgroupParent:   *cgroupParent,
-		Owner: *owner,
+		Owner:                   *owner,
 		Client: &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {

@@ -25,7 +25,7 @@ steps:
 
   - wait
   - label: ":docker:"
-    command: docker-compose build && docker-compose push
+    command: ./.buildkite/steps/push-docker.sh
     branches: master
     agents:
       queue: "deploy"

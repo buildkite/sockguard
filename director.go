@@ -31,6 +31,7 @@ type rulesDirector struct {
 	AllowBinds              []string
 	AllowHostModeNetworking bool
 	ContainerCgroupParent   string
+	User                    string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {
@@ -257,6 +258,12 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 				}
 				decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
 			}
+		}
+
+		// force user
+		if r.User != "" {
+			decoded["User"] = r.User
+			l.Printf("Forcing user to '%s'", r.User)
 		}
 
 		encoded, err := json.Marshal(decoded)

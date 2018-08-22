@@ -332,7 +332,6 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 		var filters = map[string][]interface{}{}
 
 		// parse existing filters from querystring
-		// see https://docs.docker.com/engine/api/v1.30/#operation/ContainerList
 		if qf := q.Get("filters"); qf != "" {
 			var existing map[string]interface{}
 
@@ -341,6 +340,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 				return
 			}
 
+			// different docker implementations send us different data structures
 			for k, v := range existing {
 				switch tv := v.(type) {
 				// sometimes we get a map of value=true

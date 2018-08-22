@@ -331,7 +331,8 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 		var q = req.URL.Query()
 		var filters = map[string][]string{}
 
-		// parse existing filters
+		// parse existing filters from querystring
+		// see https://docs.docker.com/engine/api/v1.30/#operation/ContainerList
 		if q.Get("filters") != "" {
 			if err := json.NewDecoder(strings.NewReader(q.Get("filters"))).Decode(&filters); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)

@@ -329,20 +329,38 @@ func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request,
 func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var q = req.URL.Query()
-		var filters = map[string][]string{}
+		var filters = map[string][]interface{}{}
 
 		// parse existing filters from querystring
 		// see https://docs.docker.com/engine/api/v1.30/#operation/ContainerList
-		if q.Get("filters") != "" {
-			if err := json.NewDecoder(strings.NewReader(q.Get("filters"))).Decode(&filters); err != nil {
+		if qf := q.Get("filters"); qf != "" {
+			var existing map[string]interface{}
+
+			if err := json.NewDecoder(strings.NewReader(qf)).Decode(&existing); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
+			}
+
+			for k, v := range existing {
+				switch tv := v.(type) {
+				// sometimes we get a map of value=true
+				case map[string]interface{}:
+					for mk := range tv {
+						filters[k] = append(filters[k], mk)
+					}
+				// sometimes we get a slice of values (from docker-compose)
+				case []interface{}:
+					filters[k] = append(filters[k], tv...)
+				default:
+					http.Error(w, fmt.Sprintf("Unhandled filter type of %T", v), http.StatusBadRequest)
+					return
+				}
 			}
 		}
 
 		// add an label slice if none exists
 		if _, exists := filters["label"]; !exists {
-			filters["label"] = []string{}
+			filters["label"] = []interface{}{}
 		}
 
 		// add an owner label

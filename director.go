@@ -328,22 +328,55 @@ func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request,
 
 func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		err := modifyRequestFilters(req, func(filters map[string][]interface{}) {
-			label := ownerKey + "=" + r.Owner
-			l.Printf("Adding label %v to label filters %v", label, filters["label"])
-			filters["label"] = []interface{}{label}
-			for _, val := range filters["label"] {
-				if valString, ok := val.(string); ok {
-					if valString != ownerKey && !strings.HasPrefix(valString, ownerKey+"=") {
-						filters["label"] = append(filters["label"], valString)
+		var q = req.URL.Query()
+		var filters = map[string][]interface{}{}
+
+		// parse existing filters from querystring
+		if qf := q.Get("filters"); qf != "" {
+			var existing map[string]interface{}
+
+			if err := json.NewDecoder(strings.NewReader(qf)).Decode(&existing); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			// different docker implementations send us different data structures
+			for k, v := range existing {
+				switch tv := v.(type) {
+				// sometimes we get a map of value=true
+				case map[string]interface{}:
+					for mk := range tv {
+						filters[k] = append(filters[k], mk)
 					}
+				// sometimes we get a slice of values (from docker-compose)
+				case []interface{}:
+					filters[k] = append(filters[k], tv...)
+				default:
+					http.Error(w, fmt.Sprintf("Unhandled filter type of %T", v), http.StatusBadRequest)
+					return
 				}
 			}
-		})
+		}
+
+		// add an label slice if none exists
+		if _, exists := filters["label"]; !exists {
+			filters["label"] = []interface{}{}
+		}
+
+		// add an owner label
+		label := ownerKey + "=" + r.Owner
+		l.Printf("Adding label %v to label filters %v", label, filters["label"])
+		filters["label"] = append(filters["label"], label)
+
+		// encode back into json
+		encoded, err := json.Marshal(filters)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		q.Set("filters", string(encoded))
+		req.URL.RawQuery = q.Encode()
 
 		upstream.ServeHTTP(w, req)
 	})
@@ -426,44 +459,6 @@ func (r *rulesDirector) inspectLabels(kind, id string) (map[string]string, error
 	}
 
 	return nil, fmt.Errorf("Unknown kind %q", kind)
-}
-
-func modifyRequestFilters(req *http.Request, f func(filters map[string][]interface{})) error {
-	var filters = map[string][]interface{}{}
-	var q = req.URL.Query()
-
-	if encoded := q.Get("filters"); encoded != "" {
-		var generic map[string]interface{}
-
-		log.Printf("filters=%q", encoded)
-		if err := json.NewDecoder(strings.NewReader(encoded)).Decode(&generic); err != nil {
-			return err
-		}
-		for k, v := range generic {
-			switch tv := v.(type) {
-			case map[string]interface{}:
-				for mk, mv := range tv {
-					log.Printf("Adding %s = %v", mk, mv)
-					filters[k] = []interface{}{mk}
-				}
-			default:
-				log.Printf("[%s] Got type %T: %v", k, v, tv)
-			}
-		}
-
-		log.Printf("%#v", filters)
-	}
-
-	f(filters)
-
-	encoded, err := json.Marshal(filters)
-	if err != nil {
-		return err
-	}
-
-	q.Set("filters", string(encoded))
-	req.URL.RawQuery = q.Encode()
-	return nil
 }
 
 func modifyRequestBody(req *http.Request, f func(filters map[string]interface{})) error {

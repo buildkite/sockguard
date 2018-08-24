@@ -87,6 +87,15 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 	}
 }
 
+func loadFixtureFile(filename_part string) (string, error) {
+	data, err := ioutil.ReadFile(fmt.Sprintf("./fixtures/%s.json", filename_part))
+	if err != nil {
+		return "", err
+	}
+	// Remove any whitespace/newlines from the start/end of the file
+	return strings.TrimSpace(string(data)), nil
+}
+
 func TestHandleContainerCreate(t *testing.T) {
 	l := mockLogger()
 
@@ -98,7 +107,10 @@ func TestHandleContainerCreate(t *testing.T) {
 		ContainerDockerLink:     "asdf:zzzz",
 	}
 
-	expectedReqJson := "TODO-read-fixtures-containers_create_1_expected.json"
+	expectedReqJson, err := loadFixtureFile("containers_create_1_expected")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// log.Printf("%s %s", req.Method, req.URL.String())
@@ -112,9 +124,8 @@ func TestHandleContainerCreate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Printf("BODY: %s\n", body)
-		if string(body) != expectedReqJson {
-			t.Error("Unexpected request body JSON")
+		if string(body) != string(expectedReqJson) {
+			t.Errorf("Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", string(expectedReqJson), string(body))
 		}
 
 		// Return empty JSON, the request is whats important not the response
@@ -123,7 +134,10 @@ func TestHandleContainerCreate(t *testing.T) {
 
 	// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
 	// Create a request to pass to our handler
-	containerCreateJson := "TODO-read-fixtures-containers_create_1.json"
+	containerCreateJson, err := loadFixtureFile("containers_create_1_in")
+	if err != nil {
+		t.Fatal(err)
+	}
 	reqUrl := "/v1.37/containers/create"
 	req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
 	if err != nil {

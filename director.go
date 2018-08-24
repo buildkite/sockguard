@@ -210,6 +210,16 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var decoded map[string]interface{}
 
+		// To populate fixtures for test coverage
+		/*
+			rawBody, err := ioutil.ReadAll(req.Body)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			fmt.Printf("RAW BODY:\n%s\n", rawBody)
+		*/
+
 		if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
 			writeError(w, err.Error(), http.StatusBadRequest)
 			return

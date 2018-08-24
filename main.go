@@ -35,6 +35,7 @@ func main() {
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
 	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value on new containers")
 	user := flag.String("user", "", "Forces --user on containers")
+	dockerLink := flag.String("docker-link", "", "Add a Docker --link from any spawned containers to another container")
 	flag.Parse()
 
 	if debug {
@@ -71,10 +72,15 @@ func main() {
 		debugf("Setting CgroupParent on new containers to '%s'", *cgroupParent)
 	}
 
+	if *dockerLink != "" {
+		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
+	}
+
 	proxy := socketproxy.New(*upstream, &rulesDirector{
 		AllowBinds:              allowBinds,
 		AllowHostModeNetworking: *allowHostModeNetworking,
 		ContainerCgroupParent:   *cgroupParent,
+		ContainerDockerLink:     *dockerLink,
 		Owner:                   *owner,
 		User:                    *user,
 		Client: &http.Client{

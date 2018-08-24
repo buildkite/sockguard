@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // Reusable mock rulesDirector instance
@@ -81,5 +83,36 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 		}
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
+	}
+}
+
+func TestSplitContainerDockerLink(t *testing.T) {
+	goodTests := map[string]containerDockerLink{
+		"38e5c22c7120":      containerDockerLink{Container: "38e5c22c7120", Alias: "38e5c22c7120"},
+		"38e5c22c7120:asdf": containerDockerLink{Container: "38e5c22c7120", Alias: "asdf"},
+		"somename":          containerDockerLink{Container: "somename", Alias: "somename"},
+		"somename:zzzz":     containerDockerLink{Container: "somename", Alias: "zzzz"},
+	}
+
+	badTests := []string{
+		"",
+		"somename:zzzz:aaaa",
+	}
+
+	for k1, v1 := range goodTests {
+		result1, err := splitContainerDockerLink(k1)
+		if err != nil {
+			t.Errorf("%s : %s", k1, err.Error())
+		}
+		if cmp.Equal(*result1, v1) != true {
+			t.Errorf("'%s' : Expected %+v, got %+v\n", k1, v1, result1)
+		}
+	}
+
+	for _, v2 := range badTests {
+		_, err := splitContainerDockerLink(v2)
+		if err == nil {
+			t.Errorf("'%s' : Expected error, got nil", v2)
+		}
 	}
 }

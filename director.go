@@ -31,6 +31,7 @@ type rulesDirector struct {
 	AllowBinds              []string
 	AllowHostModeNetworking bool
 	ContainerCgroupParent   string
+	ContainerDockerLink     string
 	User                    string
 }
 
@@ -115,11 +116,12 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 	case match(`GET`, `^/networks$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
 	case match(`POST`, `^/networks/create$`):
-		return r.addLabelsToBody(l, req, upstream)
+		return r.handleNetworkCreate(l, req, upstream)
 	case match(`POST`, `^/networks/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
+	case match(`DELETE`, `^/networks/(.+)$`):
+		return r.handleNetworkDelete(l, req, upstream)
 	case match(`GET`, `^/networks/(.+)$`),
-		match(`DELETE`, `^/networks/(.+)$`),
 		match(`POST`, `^/networks/(.+)/(connect|disconnect)$`):
 		if ok, err := r.checkOwner(l, "networks", true, req); ok {
 			return upstream
@@ -260,6 +262,15 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 			}
 		}
 
+		// apply ContainerDockerLink if enabled
+		if r.ContainerDockerLink != "" {
+			links, ok := decoded["HostConfig"].(map[string]interface{})["Links"].([]string)
+			if ok {
+				links = append(links, r.ContainerDockerLink)
+				decoded["HostConfig"].(map[string]interface{})["Links"] = links
+			}
+		}
+
 		// force user
 		if r.User != "" {
 			decoded["User"] = r.User
@@ -302,6 +313,136 @@ func isBindAllowed(bind string, allowed []string) bool {
 	}
 
 	return true
+}
+
+type containerDockerLink struct {
+	// ID or Name
+	Container string
+	Alias     string
+}
+
+func splitContainerDockerLink(input string) (*containerDockerLink, error) {
+	if input == "" {
+		return &containerDockerLink{}, fmt.Errorf("Container Link is empty string, cannot proceed")
+	}
+	splitInput := strings.Split(input, ":")
+	if len(splitInput) == 1 {
+		// container
+		return &containerDockerLink{Container: splitInput[0], Alias: splitInput[0]}, nil
+	} else if len(splitInput) == 2 {
+		// container:alias
+		return &containerDockerLink{Container: splitInput[0], Alias: splitInput[1]}, nil
+	} else {
+		return &containerDockerLink{}, fmt.Errorf("Expected 'name-or-id' or 'name-or-id:alias' (1 or 2 elements, : delimited), got %d elements from '%s'", len(splitInput), input)
+	}
+}
+
+func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Not using modifyRequestBody since we need the decoded network name further down, less duplication this way
+		var decoded map[string]interface{}
+
+		if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Get the newly created network name from original request, for use later (if ContainerDockerLink is enabled)
+		networkIdOrName, ok := decoded["Name"].(string)
+		if ok == false {
+			http.Error(w, "Failed to obtain network name from request", http.StatusBadRequest)
+			return
+		}
+
+		addLabel(ownerKey, r.Owner, decoded["Labels"])
+
+		encoded, err := json.Marshal(decoded)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// reset it so that upstream can read it again
+		req.ContentLength = int64(len(encoded))
+		req.Body = ioutil.NopCloser(bytes.NewReader(encoded))
+
+		// Do the network creation
+		upstream.ServeHTTP(w, req)
+
+		// If ContainerDockerLink is enabled, link the container to the newly created network
+		if r.ContainerDockerLink != "" {
+			// We have networkIdOrName already, see above
+
+			// Parse the ContainerDockerLink out
+			cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			// Do the container attach
+			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", cdl.Container)
+			attachReq, err := http.NewRequest("POST", fmt.Sprintf("/networks/%s/connect", networkIdOrName), strings.NewReader(attachJson))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			attachResp, err := r.Client.Do(attachReq)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if attachResp.StatusCode != 200 {
+				http.Error(w, fmt.Sprintf("Expected 200 got %d when attaching Container ID/Name '%s' to Network '%s' (after creating)", attachResp.StatusCode, cdl.Container, networkIdOrName), http.StatusBadRequest)
+				return
+			}
+			// Attached, move on
+			l.Printf("Attached Container ID/Name '%s' to Network '%s' (after creating)", cdl.Container, networkIdOrName)
+		}
+	})
+}
+
+func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// If ContainerDockerLink is enabled, detach the container from the network before deleting
+		if r.ContainerDockerLink != "" {
+			// Parse out the Network ID (or Name) to use for detaching linked container
+			splitPath := strings.Split(req.URL.String(), "/")
+			if len(splitPath) != 3 {
+				http.Error(w, fmt.Sprintf("Unable to parse out URL '%s', expected 3 components, got %d", req.URL.String(), len(splitPath)), http.StatusBadRequest)
+				return
+			}
+			networkIdOrName := splitPath[2]
+
+			// Parse the ContainerDockerLink out
+			cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			// Do the container detach (forced, so we can delete the network)
+			detachJson := fmt.Sprintf("{\"Container\":\"%s\",\"Force\":true}", cdl.Container)
+			detachReq, err := http.NewRequest("POST", fmt.Sprintf("/networks/%s/disconnect", networkIdOrName), strings.NewReader(detachJson))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			detachResp, err := r.Client.Do(detachReq)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if detachResp.StatusCode != 200 {
+				http.Error(w, fmt.Sprintf("Expected 200 got %d when detaching Container ID/Name '%s' from Network '%s' (before deleting)", detachResp.StatusCode, cdl.Container, networkIdOrName), http.StatusBadRequest)
+				return
+			}
+			// Detached, move on
+			l.Printf("Detached Container ID/Name '%s' from Network '%s' (before deleting)", cdl.Container, networkIdOrName)
+		}
+
+		// Do the network delete
+		upstream.ServeHTTP(w, req)
+	})
 }
 
 func addLabel(label, value string, into interface{}) {

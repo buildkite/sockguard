@@ -139,7 +139,13 @@ func TestHandleContainerCreate(t *testing.T) {
 
 	// Check the status code is what we expect.
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("%s : handler returned wrong status code: got %v want %v", reqUrl, status, http.StatusOK)
+		// Get the body out of the response to return with the error
+		respBody, err := ioutil.ReadAll(rr.Body)
+		if err == nil {
+			t.Errorf("%s : handler returned wrong status code: got %v want %v. Response body: %s", reqUrl, status, http.StatusOK, string(respBody))
+		} else {
+			t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", reqUrl, status, http.StatusOK, err.Error())
+		}
 	}
 
 	// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.

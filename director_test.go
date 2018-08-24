@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -14,9 +16,8 @@ import (
 
 // Reusable mock rulesDirector instance
 func mockRulesDirector() *rulesDirector {
-	rdhc := &http.Client{}
 	return &rulesDirector{
-		Client: rdhc,
+		Client: &http.Client{},
 		Owner:  "test-owner",
 		AllowHostModeNetworking: false,
 	}
@@ -84,6 +85,64 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}
+}
+
+func TestHandleContainerCreate(t *testing.T) {
+	l := mockLogger()
+
+	rd1 := &rulesDirector{
+		Client: &http.Client{},
+		Owner:  "test-owner",
+		AllowHostModeNetworking: false,
+		ContainerCgroupParent:   "some-cgroup",
+		ContainerDockerLink:     "asdf:zzzz",
+	}
+
+	expectedReqJson := "TODO-read-fixtures-containers_create_1_expected.json"
+
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// log.Printf("%s %s", req.Method, req.URL.String())
+		// Validate the request URL against expected.
+		expectedUrl := "/v1.37/containers/create"
+		if req.URL.String() != expectedUrl {
+			t.Error("Expected URL", expectedUrl, "got", req.URL.String())
+		}
+		// Validate the body has been modified as expected
+		body, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Printf("BODY: %s\n", body)
+		if string(body) != expectedReqJson {
+			t.Error("Unexpected request body JSON")
+		}
+
+		// Return empty JSON, the request is whats important not the response
+		fmt.Fprintf(w, `{}`)
+	})
+
+	// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
+	// Create a request to pass to our handler
+	containerCreateJson := "TODO-read-fixtures-containers_create_1.json"
+	reqUrl := "/v1.37/containers/create"
+	req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
+	rr := httptest.NewRecorder()
+	handler := rd1.handleContainerCreate(l, req, upstream)
+
+	// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
+	// directly and pass in our Request and ResponseRecorder.
+	handler.ServeHTTP(rr, req)
+
+	// Check the status code is what we expect.
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("%s : handler returned wrong status code: got %v want %v", reqUrl, status, http.StatusOK)
+	}
+
+	// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 }
 
 func TestSplitContainerDockerLink(t *testing.T) {

@@ -266,6 +266,7 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 		if r.ContainerDockerLink != "" {
 			links, ok := decoded["HostConfig"].(map[string]interface{})["Links"].([]string)
 			if ok {
+				l.Printf("Appending '%s' to Links for /containers/create", r.ContainerDockerLink)
 				links = append(links, r.ContainerDockerLink)
 				decoded["HostConfig"].(map[string]interface{})["Links"] = links
 			}
@@ -338,6 +339,7 @@ func splitContainerDockerLink(input string) (*containerDockerLink, error) {
 }
 
 func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+	l.Printf("handleNetworkCreate() START")
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Not using modifyRequestBody since we need the decoded network name further down, less duplication this way
 		var decoded map[string]interface{}

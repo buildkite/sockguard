@@ -96,73 +96,172 @@ func loadFixtureFile(filename_part string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+type handleContainerCreateTests struct {
+	rd *rulesDirector
+	// Expected StatusCode
+	esc int
+}
+
 func TestHandleContainerCreate(t *testing.T) {
 	l := mockLogger()
 
-	rd1 := &rulesDirector{
-		Client: &http.Client{},
-		Owner:  "test-owner",
-		AllowHostModeNetworking: false,
-		ContainerCgroupParent:   "some-cgroup",
-		ContainerDockerLink:     "asdf:zzzz",
+	// For each of the tests below, there will be 2 files in the fixtures/ dir:
+	// - <key>_in.json - the client request sent to the director
+	// - <key>_expected - the expected request sent to the upstream
+	tests := map[string]handleContainerCreateTests{
+		// Defaults
+		"containers_create_1": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+		// Defaults + custom Owner
+		"containers_create_2": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				Owner:  "test-owner",
+			},
+			esc: 200,
+		},
+		// Defaults with Binds disabled, and a bind sent (should fail)
+		"containers_create_3": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:     &http.Client{},
+				AllowBinds: []string{},
+			},
+			esc: 400,
+		},
+		// Defaults + Binds enabled + a matching bind (should pass)
+		"containers_create_4": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:     &http.Client{},
+				AllowBinds: []string{"/tmp"},
+			},
+			esc: 200,
+		},
+		// Defaults + Binds enabled + a non-matching bind (should fail)
+		"containers_create_5": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:     &http.Client{},
+				AllowBinds: []string{"/tmp"},
+			},
+			esc: 400,
+		},
+		// Defaults + Host Mode Networking + request with NetworkMode=host (should pass)
+		"containers_create_6": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:                  &http.Client{},
+				AllowHostModeNetworking: true,
+			},
+			esc: 200,
+		},
+		// Defaults + Host Mode Networking disabled + request with NetworkMode=host (should fail)
+		"containers_create_7": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:                  &http.Client{},
+				AllowHostModeNetworking: false,
+			},
+			esc: 400,
+		},
+		// Defaults + Cgroup Parent
+		"containers_create_8": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client:                &http.Client{},
+				ContainerCgroupParent: "some-cgroup",
+			},
+			esc: 200,
+		},
+		// Defaults + Docker --link + requesting default bridge network
+		/* TODO: implement
+		"containers_create_9": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				ContainerDockerLink:     "asdf:zzzz",
+			},
+			esc: 200,
+		}, */
+		// Defaults + Docker --link + requesting a user defined bridge network
+		/* TODO: implement
+		"containers_create_10": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				ContainerDockerLink:     "asdf:zzzz",
+			},
+			esc: 200,
+		}, */
+		// Defaults + Force User
+		"containers_create_11": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				User:   "someuser",
+			},
+			esc: 200,
+		},
 	}
 
-	expectedReqJson, err := loadFixtureFile("containers_create_1_expected")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqUrl := "/v1.37/containers/create"
+	expectedUrl := "/v1.37/containers/create"
 
-	upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// log.Printf("%s %s", req.Method, req.URL.String())
-		// Validate the request URL against expected.
-		expectedUrl := "/v1.37/containers/create"
-		if req.URL.String() != expectedUrl {
-			t.Error("Expected URL", expectedUrl, "got", req.URL.String())
-		}
-		// Validate the body has been modified as expected
-		body, err := ioutil.ReadAll(req.Body)
+	for k, v := range tests {
+
+		expectedReqJson, err := loadFixtureFile(fmt.Sprintf("%s_expected", k))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(body) != string(expectedReqJson) {
-			t.Errorf("Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", string(expectedReqJson), string(body))
+
+		upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// log.Printf("%s %s", req.Method, req.URL.String())
+			// Validate the request URL against expected.
+			if req.URL.String() != expectedUrl {
+				t.Error("Expected URL", expectedUrl, "got", req.URL.String())
+			}
+			// Validate the body has been modified as expected
+			body, err := ioutil.ReadAll(req.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != string(expectedReqJson) {
+				t.Errorf("%s : Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", k, string(expectedReqJson), string(body))
+			}
+
+			// Return empty JSON, the request is whats important not the response
+			fmt.Fprintf(w, `{}`)
+		})
+
+		// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
+		// Create a request to pass to our handler
+		containerCreateJson, err := loadFixtureFile(fmt.Sprintf("%s_in", k))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
+		rr := httptest.NewRecorder()
+		handler := v.rd.handleContainerCreate(l, req, upstream)
+
+		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
+		// directly and pass in our Request and ResponseRecorder.
+		handler.ServeHTTP(rr, req)
+
+		// Check the status code is what we expect.
+		if status := rr.Code; status != v.esc {
+			// Get the body out of the response to return with the error
+			respBody, err := ioutil.ReadAll(rr.Body)
+			if err == nil {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Response body: %s", k, status, v.esc, string(respBody))
+			} else {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
+			}
 		}
 
-		// Return empty JSON, the request is whats important not the response
-		fmt.Fprintf(w, `{}`)
-	})
-
-	// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
-	// Create a request to pass to our handler
-	containerCreateJson, err := loadFixtureFile("containers_create_1_in")
-	if err != nil {
-		t.Fatal(err)
+		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}
-	reqUrl := "/v1.37/containers/create"
-	req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
-	rr := httptest.NewRecorder()
-	handler := rd1.handleContainerCreate(l, req, upstream)
-
-	// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
-	// directly and pass in our Request and ResponseRecorder.
-	handler.ServeHTTP(rr, req)
-
-	// Check the status code is what we expect.
-	if status := rr.Code; status != http.StatusOK {
-		// Get the body out of the response to return with the error
-		respBody, err := ioutil.ReadAll(rr.Body)
-		if err == nil {
-			t.Errorf("%s : handler returned wrong status code: got %v want %v. Response body: %s", reqUrl, status, http.StatusOK, string(respBody))
-		} else {
-			t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", reqUrl, status, http.StatusOK, err.Error())
-		}
-	}
-
-	// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 }
 
 func TestSplitContainerDockerLink(t *testing.T) {

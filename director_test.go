@@ -129,15 +129,19 @@ func TestHandleContainerCreate(t *testing.T) {
 		// Defaults with Binds disabled, and a bind sent (should fail)
 		"containers_create_3": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:     &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:      "sockguard-pid-1",
 				AllowBinds: []string{},
 			},
-			esc: 400,
+			esc: 401,
 		},
 		// Defaults + Binds enabled + a matching bind (should pass)
 		"containers_create_4": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:     &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:      "sockguard-pid-1",
 				AllowBinds: []string{"/tmp"},
 			},
 			esc: 200,
@@ -145,15 +149,19 @@ func TestHandleContainerCreate(t *testing.T) {
 		// Defaults + Binds enabled + a non-matching bind (should fail)
 		"containers_create_5": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:     &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:      "sockguard-pid-1",
 				AllowBinds: []string{"/tmp"},
 			},
-			esc: 400,
+			esc: 401,
 		},
 		// Defaults + Host Mode Networking + request with NetworkMode=host (should pass)
 		"containers_create_6": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:                  &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
 				AllowHostModeNetworking: true,
 			},
 			esc: 200,
@@ -161,33 +169,40 @@ func TestHandleContainerCreate(t *testing.T) {
 		// Defaults + Host Mode Networking disabled + request with NetworkMode=host (should fail)
 		"containers_create_7": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:                  &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
 				AllowHostModeNetworking: false,
 			},
-			esc: 400,
+			esc: 401,
 		},
 		// Defaults + Cgroup Parent
 		"containers_create_8": handleContainerCreateTests{
 			rd: &rulesDirector{
-				Client:                &http.Client{},
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
 				ContainerCgroupParent: "some-cgroup",
 			},
 			esc: 200,
 		},
 		// Defaults + Docker --link + requesting default bridge network
-		/* TODO: implement
 		"containers_create_9": handleContainerCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
-				ContainerDockerLink:     "asdf:zzzz",
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "asdf:zzzz",
 			},
 			esc: 200,
-		}, */
+		},
 		// Defaults + Docker --link + requesting a user defined bridge network
-		/* TODO: implement
+		/* TODO: implement the network attach/detach stuff
 		"containers_create_10": handleContainerCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
 				ContainerDockerLink:     "asdf:zzzz",
 			},
 			esc: 200,
@@ -196,7 +211,18 @@ func TestHandleContainerCreate(t *testing.T) {
 		"containers_create_11": handleContainerCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
-				User:   "someuser",
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+				User:  "someuser",
+			},
+			esc: 200,
+		},
+		// Defaults + a custom label on request
+		"containers_create_12": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
 			},
 			esc: 200,
 		},
@@ -250,6 +276,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 
 		// Check the status code is what we expect.
+		//fmt.Printf("%s : SC %d ESC %d\n", k, rr.Code, v.esc)
 		if status := rr.Code; status != v.esc {
 			// Get the body out of the response to return with the error
 			respBody, err := ioutil.ReadAll(rr.Body)

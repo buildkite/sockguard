@@ -186,8 +186,27 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 200,
 		},
-		// Defaults + Docker --link + requesting default bridge network
+		// Defaults + Force User
 		"containers_create_9": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+				User:  "someuser",
+			},
+			esc: 200,
+		},
+		// Defaults + a custom label on request
+		"containers_create_10": handleContainerCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+		// Defaults + Docker --link + requesting default bridge network
+		"containers_create_11": handleContainerCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -198,7 +217,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Docker --link + requesting a user defined bridge network
 		/* TODO: implement the network attach/detach stuff
-		"containers_create_10": handleContainerCreateTests{
+		"containers_create_12": handleContainerCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -207,25 +226,6 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 200,
 		}, */
-		// Defaults + Force User
-		"containers_create_11": handleContainerCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-				User:  "someuser",
-			},
-			esc: 200,
-		},
-		// Defaults + a custom label on request
-		"containers_create_12": handleContainerCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-			},
-			esc: 200,
-		},
 	}
 
 	reqUrl := "/v1.37/containers/create"

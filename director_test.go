@@ -94,7 +94,8 @@ func loadFixtureFile(filename_part string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-type handleContainerCreateTests struct {
+// Used for handleContainerCreate(), handleNetworkCreate(), and friends
+type handleCreateTests struct {
 	rd *rulesDirector
 	// Expected StatusCode
 	esc int
@@ -104,10 +105,10 @@ func TestHandleContainerCreate(t *testing.T) {
 	l := mockLogger()
 	// For each of the tests below, there will be 2 files in the fixtures/ dir:
 	// - <key>_in.json - the client request sent to the director
-	// - <key>_expected - the expected request sent to the upstream
-	tests := map[string]handleContainerCreateTests{
+	// - <key>_expected.json - the expected request sent to the upstream
+	tests := map[string]handleCreateTests{
 		// Defaults
-		"containers_create_1": handleContainerCreateTests{
+		"containers_create_1": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -116,7 +117,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + custom Owner
-		"containers_create_2": handleContainerCreateTests{
+		"containers_create_2": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				Owner:  "test-owner",
@@ -124,7 +125,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults with Binds disabled, and a bind sent (should fail)
-		"containers_create_3": handleContainerCreateTests{
+		"containers_create_3": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -134,7 +135,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 401,
 		},
 		// Defaults + Binds enabled + a matching bind (should pass)
-		"containers_create_4": handleContainerCreateTests{
+		"containers_create_4": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -144,7 +145,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + Binds enabled + a non-matching bind (should fail)
-		"containers_create_5": handleContainerCreateTests{
+		"containers_create_5": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -154,7 +155,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 401,
 		},
 		// Defaults + Host Mode Networking + request with NetworkMode=host (should pass)
-		"containers_create_6": handleContainerCreateTests{
+		"containers_create_6": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -164,7 +165,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + Host Mode Networking disabled + request with NetworkMode=host (should fail)
-		"containers_create_7": handleContainerCreateTests{
+		"containers_create_7": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -174,7 +175,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 401,
 		},
 		// Defaults + Cgroup Parent
-		"containers_create_8": handleContainerCreateTests{
+		"containers_create_8": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -184,7 +185,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + Force User
-		"containers_create_9": handleContainerCreateTests{
+		"containers_create_9": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -194,7 +195,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + a custom label on request
-		"containers_create_10": handleContainerCreateTests{
+		"containers_create_10": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
@@ -205,6 +206,7 @@ func TestHandleContainerCreate(t *testing.T) {
 	}
 	reqUrl := "/v1.37/containers/create"
 	expectedUrl := "/v1.37/containers/create"
+	// TODOLATER: consolidate/DRY this with TestHandleNetworkCreate()?
 	for k, v := range tests {
 		expectedReqJson, err := loadFixtureFile(fmt.Sprintf("%s_expected", k))
 		if err != nil {
@@ -240,6 +242,79 @@ func TestHandleContainerCreate(t *testing.T) {
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		handler := v.rd.handleContainerCreate(l, req, upstream)
+		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
+		// directly and pass in our Request and ResponseRecorder.
+		handler.ServeHTTP(rr, req)
+		// Check the status code is what we expect.
+		//fmt.Printf("%s : SC %d ESC %d\n", k, rr.Code, v.esc)
+		if status := rr.Code; status != v.esc {
+			// Get the body out of the response to return with the error
+			respBody, err := ioutil.ReadAll(rr.Body)
+			if err == nil {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Response body: %s", k, status, v.esc, string(respBody))
+			} else {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
+			}
+		}
+		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
+	}
+}
+
+func TestHandleNetworkCreate(t *testing.T) {
+	l := mockLogger()
+	// For each of the tests below, there will be 2 files in the fixtures/ dir:
+	// - <key>_in.json - the client request sent to the director
+	// - <key>_expected.json - the expected request sent to the upstream
+	tests := map[string]handleCreateTests{
+		// Defaults
+		"networks_create_1": handleCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+	}
+	reqUrl := "/v1.37/networks/create"
+	expectedUrl := "/v1.37/networks/create"
+	// TODOLATER: consolidate/DRY this with TestHandleContainerCreate()?
+	for k, v := range tests {
+		expectedReqJson, err := loadFixtureFile(fmt.Sprintf("%s_expected", k))
+		if err != nil {
+			t.Fatal(err)
+		}
+		upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// log.Printf("%s %s", req.Method, req.URL.String())
+			// Validate the request URL against expected.
+			if req.URL.String() != expectedUrl {
+				t.Error("Expected URL", expectedUrl, "got", req.URL.String())
+			}
+			// Validate the body has been modified as expected
+			body, err := ioutil.ReadAll(req.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != string(expectedReqJson) {
+				t.Errorf("%s : Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", k, string(expectedReqJson), string(body))
+			}
+			// Return empty JSON, the request is whats important not the response
+			fmt.Fprintf(w, `{}`)
+		})
+		// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
+		// Create a request to pass to our handler
+		containerCreateJson, err := loadFixtureFile(fmt.Sprintf("%s_in", k))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
+		rr := httptest.NewRecorder()
+		// TODOLATER: in Direct(), call a handleNetworkCreate() instead?
+		handler := v.rd.addLabelsToBody(l, req, upstream)
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
 		handler.ServeHTTP(rr, req)

@@ -385,15 +385,15 @@ func TestCheckOwner(t *testing.T) {
 			// Must be set to non-nil value or it panics
 			Header: make(http.Header),
 		}
-		re := regexp.MustCompile("^/containers/(.*)/json$")
+		re := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
 		switch req.Method {
 		case "GET":
 			switch {
 			case re.MatchString(req.URL.Path):
 				// inspect container - /containers/{id}/json
 				parsePath := re.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 2 {
-					containerId := parsePath[1]
+				if len(parsePath) == 3 {
+					containerId := parsePath[2]
 					// Vary the response based on container ID (easiest option)
 					// Partial JSON result, enough to satisfy the inspectLabels() struct
 					switch containerId {
@@ -402,7 +402,7 @@ func TestCheckOwner(t *testing.T) {
 						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", containerId)))
 					case "idwithlabel1":
 						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"sockguard-pid-1\"}}}", containerId)))
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", containerId)))
 					default:
 						resp.StatusCode = 401
 						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", containerId)))

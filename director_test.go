@@ -12,6 +12,14 @@ import (
 	"testing"
 )
 
+// Mock upstream Docker daemon, to test features that require
+// upstream state to validate.
+func mockUpstreamDocker() *httptest.Server {
+	// TODO: use httptest.NewServer() here
+	// TODO: inspect endpoint for CheckOwner
+	// TODO: networks connect/disconnect endpoints for handleNetworkCreate/handleNetworkDelete
+}
+
 // Reusable mock rulesDirector instance
 func mockRulesDirector() *rulesDirector {
 	return &rulesDirector{
@@ -331,4 +339,8 @@ func TestHandleNetworkCreate(t *testing.T) {
 		}
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}
+}
+
+func TestCheckOwner(t *testing.T) {
+	// TODO: implement using mocked upstream Docker daemon
 }

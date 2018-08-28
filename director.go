@@ -176,6 +176,7 @@ func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty
 	for _, re := range identifierPatterns {
 		if m := re.FindStringSubmatch(path); len(m) > 0 {
 			identifier = m[1]
+			break
 		}
 	}
 

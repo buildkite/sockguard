@@ -25,7 +25,8 @@ steps:
 
   - wait
   - label: ":docker:"
-    command: ./.buildkite/steps/push-docker.sh
     branches: master
-    agents:
-      queue: "deploy"
+    plugins:
+      docker-login#v2.0.1: ~
+      docker-compose#v2.5.1:
+        push: sockguard

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -8,23 +9,59 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
 
+// Credit: http://hassansin.github.io/Unit-Testing-http-client-in-Go
+type roundTripFunc func(req *http.Request) *http.Response
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req), nil
+}
+
 // Mock upstream Docker daemon, to test features that require
 // upstream state to validate.
 func mockUpstreamDocker() *httptest.Server {
-	// TODO: use httptest.NewServer() here
-	// TODO: inspect endpoint for CheckOwner
-	// TODO: networks connect/disconnect endpoints for handleNetworkCreate/handleNetworkDelete
+	re1 := regexp.MustCompile("^/containers/(.*)/json$")
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			switch {
+			case re1.MatchString(r.URL.Path):
+				// inspect container - /containers/{id}/json
+				parsePath := re1.FindStringSubmatch(r.URL.Path)
+				if len(parsePath) != 2 {
+					http.Error(w, fmt.Sprintf("Failure parsing container ID from path - %s\n", r.URL.Path), 501)
+				}
+				containerId := parsePath[1]
+				// Vary the response based on container ID (easiest option)
+				// Partial JSON result, enough to satisfy the inspectLabels() struct
+				switch containerId {
+				case "idwithnolabel":
+					w.Write([]byte(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", containerId)))
+				case "idwithlabel1":
+					w.Write([]byte(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"sockguard-pid-1\"}}}", containerId)))
+				default:
+					w.Write([]byte(fmt.Sprintf("{\"message\":\"No such container: %s\"}", containerId)))
+				}
+			default:
+				http.Error(w, fmt.Sprintf("Unhandled GET path - %s\n", r.URL.Path), 501)
+			}
+		default:
+			http.Error(w, fmt.Sprintf("Unhandled method - %s to %s\n", r.Method, r.URL.Path), 501)
+		}
+	}))
 }
 
 // Reusable mock rulesDirector instance
-func mockRulesDirector() *rulesDirector {
+func mockRulesDirector(tfn roundTripFunc) *rulesDirector {
 	return &rulesDirector{
-		Client: &http.Client{},
-		Owner:  "test-owner",
+		Client: &http.Client{
+			Transport: roundTripFunc(tfn),
+		},
+		Owner: "test-owner",
 		AllowHostModeNetworking: false,
 	}
 }
@@ -35,8 +72,8 @@ func mockLogger() *log.Logger {
 }
 
 func TestAddLabelsToQueryStringFilters(t *testing.T) {
-	r := mockRulesDirector()
 	l := mockLogger()
+	r := mockRulesDirector(func(req *http.Request) *http.Response { return &http.Response{} })
 
 	// key = client side URL (inc query params)
 	// value = expected request URL on upstream side (inc query params)
@@ -52,17 +89,17 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 		"/v1.32/containers/json?limit=-1&all=0&size=0&trunc_cmd=0&filters=%7B%22label%22%3A+%5B%22com.docker.compose.project%3Dblah%22%2C+%22com.docker.compose.oneoff%3DTrue%22%5D%7D": "/v1.32/containers/json?all=0&filters=%7B%22label%22%3A%5B%22com.docker.compose.project%3Dblah%22%2C%22com.docker.compose.oneoff%3DTrue%22%2C%22com.buildkite.sockguard.owner%3Dtest-owner%22%5D%7D&limit=-1&size=0&trunc_cmd=0",
 	}
 
-	for c_req_url, u_req_url := range tests {
+	for cReqUrl, uReqUrl := range tests {
 		upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			// log.Printf("%s %s", req.Method, req.URL.String())
 			// Validate the request URL against expected.
-			if req.URL.String() != u_req_url {
-				decode_u_req_url, err1 := url.QueryUnescape(u_req_url)
-				decode_in_req_url, err2 := url.QueryUnescape(req.URL.String())
+			if req.URL.String() != uReqUrl {
+				decodeUReqUrl, err1 := url.QueryUnescape(uReqUrl)
+				decodeInReqUrl, err2 := url.QueryUnescape(req.URL.String())
 				if err1 == nil && err2 == nil {
-					t.Errorf("Expected:\n%s\ngot:\n%s\n\n(URL decoded) Expected:\n%s\ngot:\n%s\n", u_req_url, req.URL.String(), decode_u_req_url, decode_in_req_url)
+					t.Errorf("Expected:\n%s\ngot:\n%s\n\n(URL decoded) Expected:\n%s\ngot:\n%s\n", uReqUrl, req.URL.String(), decodeUReqUrl, decodeInReqUrl)
 				} else {
-					t.Errorf("Expected:\n%s\ngot:\n%s\n\n(errors trying to URL decode)\n", u_req_url, req.URL.String())
+					t.Errorf("Expected:\n%s\ngot:\n%s\n\n(errors trying to URL decode)\n", uReqUrl, req.URL.String())
 				}
 			}
 
@@ -72,7 +109,7 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 
 		// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
 		// Create a request to pass to our handler
-		req, err := http.NewRequest("GET", c_req_url, nil)
+		req, err := http.NewRequest("GET", cReqUrl, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +123,7 @@ func TestAddLabelsToQueryStringFilters(t *testing.T) {
 
 		// Check the status code is what we expect.
 		if status := rr.Code; status != http.StatusOK {
-			t.Errorf("%s : handler returned wrong status code: got %v want %v", c_req_url, status, http.StatusOK)
+			t.Errorf("%s : handler returned wrong status code: got %v want %v", cReqUrl, status, http.StatusOK)
 		}
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
@@ -342,5 +379,70 @@ func TestHandleNetworkCreate(t *testing.T) {
 }
 
 func TestCheckOwner(t *testing.T) {
-	// TODO: implement using mocked upstream Docker daemon
+	l := mockLogger()
+	r := mockRulesDirector(func(req *http.Request) *http.Response {
+		resp := http.Response{
+			// Must be set to non-nil value or it panics
+			Header: make(http.Header),
+		}
+		re := regexp.MustCompile("^/containers/(.*)/json$")
+		switch req.Method {
+		case "GET":
+			switch {
+			case re.MatchString(req.URL.Path):
+				// inspect container - /containers/{id}/json
+				parsePath := re.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 2 {
+					containerId := parsePath[1]
+					// Vary the response based on container ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					switch containerId {
+					case "idwithnolabel":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", containerId)))
+					case "idwithlabel1":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"sockguard-pid-1\"}}}", containerId)))
+					default:
+						resp.StatusCode = 401
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", containerId)))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
+				}
+			default:
+				resp.StatusCode = 501
+				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
+			}
+		default:
+			resp.StatusCode = 501
+			resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
+		}
+		return &resp
+	})
+
+	tests := make(map[*http.Request]bool)
+	// A container that will match
+	req1, err := http.NewRequest("GET", "/v1.37/containers/idwithlabel1/logs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests[req1] = true
+	// A container that won't match test
+	req2, err := http.NewRequest("GET", "/v1.37/containers/idwithnolabel/logs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests[req2] = false
+
+	for k, v := range tests {
+		result, err := r.checkOwner(l, "containers", false, k)
+		if err != nil {
+			t.Errorf("%s : Error - %s", k.URL.String(), err.Error())
+		}
+		if v != result {
+			t.Errorf("%s : Expected %t, got %t", k.URL.String(), v, result)
+		}
+	}
 }

@@ -89,7 +89,7 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 
 	// Build related endpoints
 	case match(`POST`, `^/build$`):
-		return r.addLabelsToQueryStringLabels(l, req, upstream)
+		return r.handleBuild(l, req, upstream)
 
 	// Image related endpoints
 	case match(`GET`, `^/images/json$`):
@@ -383,7 +383,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringLabels(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *rulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		l.Printf("Adding label %s=%s to querystring: %s %s",
 			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)

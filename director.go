@@ -269,11 +269,26 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 
 		// apply ContainerDockerLink if enabled
 		if r.ContainerDockerLink != "" {
-			links, ok := decoded["HostConfig"].(map[string]interface{})["Links"].([]string)
+			links, ok := decoded["HostConfig"].(map[string]interface{})["Links"]
 			if ok {
+				fmt.Printf("links (1): %+v\n", links)
+				// Need to populate this from the interface value
+				newLinks := []string{}
+				if links != nil {
+					switch links := links.(type) {
+					case []string:
+						for _, v := range links {
+							newLinks = append(newLinks, v)
+						}
+					default:
+						// TODO: error handling
+					}
+				}
+				fmt.Printf("links (2): %+v\n", newLinks)
 				l.Printf("Appending '%s' to Links for /containers/create", r.ContainerDockerLink)
-				links = append(links, r.ContainerDockerLink)
-				decoded["HostConfig"].(map[string]interface{})["Links"] = links
+				newLinks = append(newLinks, r.ContainerDockerLink)
+				decoded["HostConfig"].(map[string]interface{})["Links"] = newLinks
+				fmt.Printf("links (3): %+v\n", decoded["HostConfig"].(map[string]interface{})["Links"])
 			}
 		}
 

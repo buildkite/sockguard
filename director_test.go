@@ -251,7 +251,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 200,
 		},
-		// Defaults + Docker --link + requesting default bridge network
+		// Defaults + -docker-link sockguard + requesting default bridge network
 		"containers_create_11": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
@@ -261,7 +261,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 200,
 		},
-		// Defaults + Docker --link + requesting a user defined bridge network
+		// Defaults + -docker-link sockguard flag + requesting a user defined bridge network
 		"containers_create_12": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
@@ -279,6 +279,16 @@ func TestHandleContainerCreate(t *testing.T) {
 				Owner: "sockguard-pid-1",
 			},
 			esc: 401,
+		},
+		// Defaults + -docker-link sockguard flag + requesting a user defined bridge network + another arbitrary --link from client
+		"containers_create_14": handleCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "cccc:dddd",
+			},
+			esc: 200,
 		},
 	}
 
@@ -325,6 +335,8 @@ func TestHandleContainerCreate(t *testing.T) {
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		handler := v.rd.handleContainerCreate(l, req, upstream)
+
+		// TODO: for _11 and _12, ensure network connect was performed
 
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
@@ -386,6 +398,16 @@ func TestHandleNetworkCreate(t *testing.T) {
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+		// Defaults + -docker-link enabled
+		"networks_create_2": handleCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "bbbb:cccc",
 			},
 			esc: 200,
 		},

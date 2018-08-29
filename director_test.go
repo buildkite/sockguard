@@ -262,16 +262,15 @@ func TestHandleContainerCreate(t *testing.T) {
 			esc: 200,
 		},
 		// Defaults + Docker --link + requesting a user defined bridge network
-		/* TODO: implement the network attach/detach stuff
 		"containers_create_12": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-				ContainerDockerLink:     "asdf:zzzz",
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "asdf:zzzz",
 			},
 			esc: 200,
-		}, */
+		},
 		// Defaults + try set a CgroupParent (should fail, only permitted if sockguard started with -cgroup-parent)
 		"containers_create_13": handleCreateTests{
 			rd: &rulesDirector{

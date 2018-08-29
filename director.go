@@ -344,7 +344,6 @@ func splitContainerDockerLink(input string) (*containerDockerLink, error) {
 }
 
 func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
-	l.Printf("handleNetworkCreate() START")
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Not using modifyRequestBody since we need the decoded network name further down, less duplication this way
 		var decoded map[string]interface{}

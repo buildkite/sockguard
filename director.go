@@ -269,26 +269,26 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 
 		// apply ContainerDockerLink if enabled
 		if r.ContainerDockerLink != "" {
+			// NOTE: The way Links are parsed out is not elegant, but doing it in two phases was the only answer
+			// I had to avoid nil panics in the end, while being able to iterate over non-nil slices of interfaces.
 			links, ok := decoded["HostConfig"].(map[string]interface{})["Links"]
 			if ok {
-				fmt.Printf("links (1): %+v\n", links)
 				// Need to populate this from the interface value
 				newLinks := []string{}
 				if links != nil {
-					switch links := links.(type) {
-					case []string:
-						for _, v := range links {
-							newLinks = append(newLinks, v)
-						}
-					default:
-						// TODO: error handling
+					useLinks := links.([]interface{})
+					newLinks = make([]string, len(useLinks))
+					for i, v := range useLinks {
+						newLinks[i] = fmt.Sprint(v)
 					}
 				}
-				fmt.Printf("links (2): %+v\n", newLinks)
 				l.Printf("Appending '%s' to Links for /containers/create", r.ContainerDockerLink)
 				newLinks = append(newLinks, r.ContainerDockerLink)
 				decoded["HostConfig"].(map[string]interface{})["Links"] = newLinks
-				fmt.Printf("links (3): %+v\n", decoded["HostConfig"].(map[string]interface{})["Links"])
+			} else {
+				l.Printf("Denied container create: unable to parse Links %+v", links)
+				writeError(w, fmt.Sprintf("Denied container create: unable to parse Links %+v", links), http.StatusBadRequest)
+				return
 			}
 		}
 

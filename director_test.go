@@ -280,7 +280,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 401,
 		},
-		// Defaults + -docker-link sockguard flag + requesting a user defined bridge network + another arbitrary --link from client
+		// Defaults + -docker-link sockguard flag + requesting default bridge network + another arbitrary --link from client
 		"containers_create_14": handleCreateTests{
 			rd: &rulesDirector{
 				Client: &http.Client{},

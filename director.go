@@ -250,7 +250,7 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 		cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
 		if ok == false {
 			l.Printf("Denied container create: failed to cast CgroupParent to string")
-			writeError(w, "Denied container create: failed to cast CgroupParent to string", http.StatusUnauthorized)
+			writeError(w, "Denied container create: failed to cast CgroupParent to string", http.StatusBadRequest)
 			return
 		}
 		// Prevent setting a CgroupParent if flag is disabled, for host safety

@@ -272,6 +272,15 @@ func TestHandleContainerCreate(t *testing.T) {
 			},
 			esc: 200,
 		}, */
+		// Defaults + try set a CgroupParent (should fail, only permitted if sockguard started with -cgroup-parent)
+		"containers_create_13": handleCreateTests{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 401,
+		},
 	}
 
 	reqUrl := "/v1.37/containers/create"
@@ -441,6 +450,8 @@ func TestHandleNetworkCreate(t *testing.T) {
 	}
 }
 
+// TODOLATER: would it make more sense to implement a TestDirect, or TestDirect* (break it into variations by path or method)?
+// Since that would also cover Direct() + CheckOwner(). Or do we do both...?
 func TestCheckOwner(t *testing.T) {
 	l := mockLogger()
 	r := mockRulesDirector(func(req *http.Request) *http.Response {
@@ -448,31 +459,96 @@ func TestCheckOwner(t *testing.T) {
 			// Must be set to non-nil value or it panics
 			Header: make(http.Header),
 		}
-		re := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
+		re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
+		re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
+		re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
+		re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
 		switch req.Method {
 		case "GET":
 			switch {
-			case re.MatchString(req.URL.Path):
+			case re1.MatchString(req.URL.Path):
 				// inspect container - /containers/{id}/json
-				parsePath := re.FindStringSubmatch(req.URL.Path)
+				parsePath := re1.FindStringSubmatch(req.URL.Path)
 				if len(parsePath) == 3 {
-					containerId := parsePath[2]
 					// Vary the response based on container ID (easiest option)
 					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					switch containerId {
+					switch parsePath[2] {
 					case "idwithnolabel":
 						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", containerId)))
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", parsePath[2])))
 					case "idwithlabel1":
 						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", containerId)))
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", parsePath[2])))
 					default:
-						resp.StatusCode = 401
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", containerId)))
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", parsePath[2])))
 					}
 				} else {
 					resp.StatusCode = 501
 					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
+				}
+			case re2.MatchString(req.URL.Path):
+				// inspect image - /images/{id}/json
+				parsePath := re2.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on image ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					switch parsePath[2] {
+					case "idwithnolabel":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", parsePath[2])))
+					case "idwithlabel1":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", parsePath[2])))
+					default:
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"no such image: %s: No such image: %s:latest\"}", parsePath[2], parsePath[2])))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
+				}
+			case re3.MatchString(req.URL.Path):
+				// inspect network - /networks/{id}
+				parsePath := re3.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on network ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					switch parsePath[2] {
+					case "idwithnolabel":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{}}", parsePath[2])))
+					case "idwithlabel1":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}", parsePath[2])))
+					default:
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
+				}
+			case re4.MatchString(req.URL.Path):
+				// inspect volume - /volume/{name}
+				parsePath := re4.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on volume name (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					switch parsePath[2] {
+					case "namewithnolabel":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{}}", parsePath[2])))
+					case "namewithlabel1":
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}", parsePath[2])))
+					default:
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"get %s: no such volume\"}", parsePath[2])))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing volume name from path - %s\n", req.URL.Path)))
 				}
 			default:
 				resp.StatusCode = 501
@@ -485,27 +561,39 @@ func TestCheckOwner(t *testing.T) {
 		return &resp
 	})
 
-	tests := make(map[*http.Request]bool)
-	// A container that will match
-	req1, err := http.NewRequest("GET", "/v1.37/containers/idwithlabel1/logs", nil)
-	if err != nil {
-		t.Fatal(err)
+	tests := map[string]struct {
+		Type      string
+		ExpResult bool
+	}{
+		// A container that will match
+		"/v1.37/containers/idwithlabel1/logs": {"containers", true},
+		// A container that won't match
+		"/v1.37/containers/idwithnolabel/logs": {"containers", false},
+		// An image that will match
+		"/v1.37/images/idwithlabel1/json": {"images", true},
+		// An image that won't match
+		"/v1.37/images/idwithnolabel/json": {"images", false},
+		// A network that will match
+		"/v1.37/networks/idwithlabel1": {"networks", true},
+		// A network that won't match
+		"/v1.37/networks/idwithnolabel": {"networks", false},
+		// A volume that will match
+		"/v1.37/volumes/namewithlabel1": {"volumes", true},
+		// A volume that won't match
+		"/v1.37/volumes/namewithnolabel": {"volumes", false},
 	}
-	tests[req1] = true
-	// A container that won't match test
-	req2, err := http.NewRequest("GET", "/v1.37/containers/idwithnolabel/logs", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests[req2] = false
 
 	for k, v := range tests {
-		result, err := r.checkOwner(l, "containers", false, k)
+		kReq, err := http.NewRequest("GET", k, nil)
 		if err != nil {
-			t.Errorf("%s : Error - %s", k.URL.String(), err.Error())
+			t.Fatal(err)
 		}
-		if v != result {
-			t.Errorf("%s : Expected %t, got %t", k.URL.String(), v, result)
+		result, err := r.checkOwner(l, v.Type, false, kReq)
+		if err != nil {
+			t.Errorf("%s : Error - %s", kReq.URL.String(), err.Error())
+		}
+		if v.ExpResult != result {
+			t.Errorf("%s : Expected %t, got %t", kReq.URL.String(), v.ExpResult, result)
 		}
 	}
 }

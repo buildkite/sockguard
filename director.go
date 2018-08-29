@@ -178,6 +178,7 @@ func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty
 	for _, re := range identifierPatterns {
 		if m := re.FindStringSubmatch(path); len(m) > 0 {
 			identifier = m[1]
+			break
 		}
 	}
 
@@ -248,18 +249,22 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 			return
 		}
 
-		// apply CgroupParent if enabled
+		cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
+		if ok == false {
+			l.Printf("Denied container create: failed to cast CgroupParent to string")
+			writeError(w, "Denied container create: failed to cast CgroupParent to string", http.StatusBadRequest)
+			return
+		}
+		// Prevent setting a CgroupParent if flag is disabled, for host safety
+		if cgroupParent != "" {
+			l.Printf("Denied requested CgroupParent '%s' on container create (flag disabled)", cgroupParent)
+			writeError(w, fmt.Sprintf("Containers aren't allowed to set their own CgroupParent (received '%s')", cgroupParent), http.StatusUnauthorized)
+			return
+		}
+		// Apply the specified CgroupParent, if flag enabled
 		if r.ContainerCgroupParent != "" {
-			// If a CgroupParent is already specified, bug out
-			cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
-			if ok {
-				if cgroupParent != "" {
-					l.Printf("Denied container create due to existing CgroupParent '%s' (override not permitted)", cgroupParent)
-					writeError(w, fmt.Sprintf("Cannot override CgroupParent value '%s' on container create", cgroupParent), http.StatusUnauthorized)
-					return
-				}
-				decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
-			}
+			l.Printf("Applied CgroupParent '%s'", cgroupParent)
+			decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
 		}
 
 		// apply ContainerDockerLink if enabled

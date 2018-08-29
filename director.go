@@ -389,28 +389,42 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 
 func (r *rulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Parse out query string to modify it
+		var q = req.URL.Query()
+
+		// Owner label
 		l.Printf("Adding label %s=%s to querystring: %s %s",
 			ownerKey, r.Owner, req.URL.Path, req.URL.RawQuery)
-
-		var q = req.URL.Query()
 		var labels = map[string]string{}
-
 		if encoded := q.Get("labels"); encoded != "" {
 			if err := json.NewDecoder(strings.NewReader(encoded)).Decode(&labels); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
-
 		labels[ownerKey] = r.Owner
-
 		encoded, err := json.Marshal(labels)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		q.Set("labels", string(encoded))
+
+		// CgroupParent
+		cgroupParent := q.Get("cgroupparent")
+		// Prevent setting a CgroupParent if flag is disabled, for host safety
+		if cgroupParent != "" {
+			l.Printf("Denied requested CgroupParent '%s' on build (flag disabled)", cgroupParent)
+			writeError(w, fmt.Sprintf("Image builds aren't allowed to set their own CgroupParent (received '%s')", cgroupParent), http.StatusUnauthorized)
+			return
+		}
+		// Apply the specified CgroupParent, if flag enabled
+		if r.ContainerCgroupParent != "" {
+			l.Printf("Applied CgroupParent '%s' to image build", cgroupParent)
+			q.Set("cgroupparent", r.ContainerCgroupParent)
+		}
+
+		// Rebuild the query string ready to forward request
 		req.URL.RawQuery = q.Encode()
 
 		upstream.ServeHTTP(w, req)

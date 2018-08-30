@@ -48,6 +48,7 @@ func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
 		re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
 		re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
 		switch req.Method {
+		// TODO: add basic POST + DELETE support, using upstream state
 		case "GET":
 			switch {
 			case re1.MatchString(req.URL.Path):

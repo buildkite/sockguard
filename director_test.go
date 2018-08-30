@@ -24,40 +24,6 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req), nil
 }
 
-// Mock upstream Docker daemon, to test features that require
-// upstream state to validate.
-func mockUpstreamDocker() *httptest.Server {
-	re1 := regexp.MustCompile("^/containers/(.*)/json$")
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case "GET":
-			switch {
-			case re1.MatchString(r.URL.Path):
-				// inspect container - /containers/{id}/json
-				parsePath := re1.FindStringSubmatch(r.URL.Path)
-				if len(parsePath) != 2 {
-					http.Error(w, fmt.Sprintf("Failure parsing container ID from path - %s\n", r.URL.Path), 501)
-				}
-				containerId := parsePath[1]
-				// Vary the response based on container ID (easiest option)
-				// Partial JSON result, enough to satisfy the inspectLabels() struct
-				switch containerId {
-				case "idwithnolabel":
-					w.Write([]byte(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", containerId)))
-				case "idwithlabel1":
-					w.Write([]byte(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"sockguard-pid-1\"}}}", containerId)))
-				default:
-					w.Write([]byte(fmt.Sprintf("{\"message\":\"No such container: %s\"}", containerId)))
-				}
-			default:
-				http.Error(w, fmt.Sprintf("Unhandled GET path - %s\n", r.URL.Path), 501)
-			}
-		default:
-			http.Error(w, fmt.Sprintf("Unhandled method - %s to %s\n", r.Method, r.URL.Path), 501)
-		}
-	}))
-}
-
 // Reusable mock rulesDirector instance
 func mockRulesDirector(tfn roundTripFunc) *rulesDirector {
 	return &rulesDirector{
@@ -67,6 +33,105 @@ func mockRulesDirector(tfn roundTripFunc) *rulesDirector {
 		Owner: "test-owner",
 		AllowHostModeNetworking: false,
 	}
+}
+
+// Reusable mock rulesDirector instance - with "state" management of mocked upstream Docker daemon
+// Just containers/networks initially
+func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
+	return mockRulesDirector(func(req *http.Request) *http.Response {
+		resp := http.Response{
+			// Must be set to non-nil value or it panics
+			Header: make(http.Header),
+		}
+		re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
+		re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
+		re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
+		re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
+		switch req.Method {
+		case "GET":
+			switch {
+			case re1.MatchString(req.URL.Path):
+				// inspect container - /containers/{id}/json
+				parsePath := re1.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on container ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					if us.doesContainerExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", parsePath[2])))
+					} else {
+						containerOwnerLabel := us.ownerLabelContent(us.getContainerOwner(parsePath[2]))
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], containerOwnerLabel)))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
+				}
+			case re2.MatchString(req.URL.Path):
+				// inspect image - /images/{id}/json
+				parsePath := re2.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on image ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					if us.doesImageExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"no such image: %s: No such image: %s:latest\"}", parsePath[2], parsePath[2])))
+					} else {
+						imageOwnerLabel := us.ownerLabelContent(us.getImageOwner(parsePath[2]))
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], imageOwnerLabel)))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
+				}
+			case re3.MatchString(req.URL.Path):
+				// inspect network - /networks/{id}
+				parsePath := re3.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on network ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					if us.doesNetworkExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+					} else {
+						networkOwnerLabel := us.ownerLabelContent(us.getNetworkOwner(parsePath[2]))
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{%s}}", parsePath[2], networkOwnerLabel)))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
+				}
+			case re4.MatchString(req.URL.Path):
+				// inspect volume - /volume/{name}
+				parsePath := re4.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) == 3 {
+					// Vary the response based on volume name (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					if us.doesVolumeExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"get %s: no such volume\"}", parsePath[2])))
+					} else {
+						volumeOwnerLabel := us.ownerLabelContent(us.getVolumeOwner(parsePath[2]))
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{%s}}", parsePath[2], volumeOwnerLabel)))
+					}
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing volume name from path - %s\n", req.URL.Path)))
+				}
+			default:
+				resp.StatusCode = 501
+				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
+			}
+		default:
+			resp.StatusCode = 501
+			resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
+		}
+		return &resp
+	})
 }
 
 // Reusable mock log.Logger instance
@@ -420,135 +485,6 @@ func TestSplitContainerDockerLink(t *testing.T) {
 	}
 }
 
-// Simplified mocked out upstream state of Docker networks, for use in create container/create network/delete network tests
-type upstreamState struct {
-	// Key = network name/ID
-	networks map[string]upstreamStateNetwork
-	// Key = container name/ID
-	containers map[string]upstreamStateContainer
-}
-
-type upstreamStateNetwork struct {
-	owner string
-}
-
-type upstreamStateContainer struct {
-	owner            string
-	attachedNetworks []string
-}
-
-func (u *upstreamState) createContainer(idOrName string, theOwner string, networks []string) error {
-	// Deny if already exists
-	if _, ok := u.containers[idOrName]; ok {
-		return fmt.Errorf("Cannot create container with ID/Name '%s', already exists", idOrName)
-	}
-	// "Create" it
-	u.containers[idOrName] = upstreamStateContainer{
-		owner:            theOwner,
-		attachedNetworks: networks,
-	}
-	return nil
-}
-
-func (u *upstreamState) deleteContainer(idOrName string) error {
-	// Deny if does not exist
-	if _, ok := u.containers[idOrName]; ok == false {
-		return fmt.Errorf("Cannot delete container with ID/Name '%s', does not exist", idOrName)
-	}
-	// "Delete" it
-	delete(u.containers, idOrName)
-	return nil
-}
-
-func (u *upstreamState) createNetwork(idOrName string, theOwner string) error {
-	// Deny if already exists
-	if _, ok := u.networks[idOrName]; ok {
-		return fmt.Errorf("Cannot create network with ID/Name '%s', already exists", idOrName)
-	}
-	// "Create" it
-	u.networks[idOrName] = upstreamStateNetwork{
-		owner: theOwner,
-	}
-	return nil
-}
-
-func (u *upstreamState) deleteNetwork(idOrName string) error {
-	// Deny if does not exist
-	if _, ok := u.networks[idOrName]; ok == false {
-		return fmt.Errorf("Cannot delete network with ID/Name '%s', does not exist", idOrName)
-	}
-	// You can't delete a network that has attached "endpoints" on a real Docker daemon, simulate
-	// that for containers only for now.
-	for k1, v1 := range u.containers {
-		for _, v2 := range v1.attachedNetworks {
-			if v2 == idOrName {
-				return fmt.Errorf("Cannot delete network with ID/Name '%s', endpoint still attached (container '%s')", idOrName, k1)
-			}
-		}
-	}
-	// "Delete" it
-	delete(u.networks, idOrName)
-	return nil
-}
-
-func (u *upstreamState) networkConnectDisconnectChecks(containerIdOrName string, networkIdOrName string) error {
-	if _, ok := u.containers[containerIdOrName]; ok == false {
-		return fmt.Errorf("container does not exist")
-	}
-	if _, ok := u.networks[networkIdOrName]; ok == false {
-		return fmt.Errorf("network does not exist")
-	}
-	return nil
-}
-
-func (u *upstreamState) isContainerConnectedToNetwork(containerIdOrName string, networkIdOrName string) bool {
-	// TODOLATER: check the container exists before proceeding? considering what's executing this, skipping duplication for now
-	for _, v := range u.containers[containerIdOrName].attachedNetworks {
-		if v == networkIdOrName {
-			return true
-		}
-	}
-	return false
-}
-
-func (u *upstreamState) connectContainerToNetwork(containerIdOrName string, networkIdOrName string) error {
-	// Deny if container or network does not exist
-	if err := u.networkConnectDisconnectChecks(containerIdOrName, networkIdOrName); err != nil {
-		return fmt.Errorf("Cannot connect container '%s' to network '%s', %s", containerIdOrName, networkIdOrName, err.Error())
-	}
-	// Check if container is already attached to this network, if so deny
-	if u.isContainerConnectedToNetwork(containerIdOrName, networkIdOrName) == true {
-		return fmt.Errorf("Cannot connect container '%s' to network '%s', already attached", containerIdOrName, networkIdOrName)
-	}
-	// "Connect" the container to the network
-	container := u.containers[containerIdOrName]
-	container.attachedNetworks = append(container.attachedNetworks, networkIdOrName)
-	u.containers[containerIdOrName] = container
-	return nil
-}
-
-func (u *upstreamState) disconnectContainerToNetwork(containerIdOrName string, networkIdOrName string) error {
-	// Deny if container or network does not exist
-	if err := u.networkConnectDisconnectChecks(containerIdOrName, networkIdOrName); err != nil {
-		return fmt.Errorf("Cannot disconnect container '%s' from network '%s', %s", containerIdOrName, networkIdOrName, err.Error())
-	}
-	// Check if container is already attached to this network, if not deny
-	if u.isContainerConnectedToNetwork(containerIdOrName, networkIdOrName) == false {
-		return fmt.Errorf("Cannot disconnect container '%s' from network '%s', not attached", containerIdOrName, networkIdOrName)
-	}
-	// "Disconnect" the container from the network
-	newAttachedNetworks := []string{}
-	for _, v := range u.containers[containerIdOrName].attachedNetworks {
-		if v != networkIdOrName {
-			newAttachedNetworks = append(newAttachedNetworks, v)
-		}
-	}
-	container := u.containers[containerIdOrName]
-	container.attachedNetworks = newAttachedNetworks
-	u.containers[containerIdOrName] = container
-	return nil
-}
-
 func TestHandleNetworkCreate(t *testing.T) {
 	l := mockLogger()
 	// For each of the tests below, there will be 2 files in the fixtures/ dir:
@@ -577,7 +513,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 	}
 
 	// Pre-populated simplified upstream state that "exists" before tests execute.
-	us := upstreamState{
+	/*us := upstreamState{
 		containers: map[string]upstreamStateContainer{
 			"ciagentcontainer": upstreamStateContainer{
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
@@ -586,7 +522,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 				attachedNetworks: []string{},
 			},
 		},
-	}
+	}*/
 
 	reqUrl := "/v1.37/networks/create"
 	expectedUrl := "/v1.37/networks/create"
@@ -695,7 +631,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 	}
 
 	// Pre-populated simplified upstream state that "exists" before tests execute.
-	us := upstreamState{
+	/*us := upstreamState{
 		containers: map[string]upstreamStateContainer{
 			"ciagentcontainer": upstreamStateContainer{
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
@@ -717,7 +653,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 				owner: "sockguard-pid-1",
 			},
 		},
-	}
+	}*/
 
 	reqUrl := "/v1.37/networks/networktodelete"
 	expectedUrl := "/v1.37/networks/networktodelete"
@@ -800,112 +736,48 @@ func TestHandleNetworkDelete(t *testing.T) {
 // Since that would also cover Direct() + CheckOwner(). Or do we do both...?
 func TestCheckOwner(t *testing.T) {
 	l := mockLogger()
-	r := mockRulesDirector(func(req *http.Request) *http.Response {
-		resp := http.Response{
-			// Must be set to non-nil value or it panics
-			Header: make(http.Header),
-		}
-		re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
-		re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
-		re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
-		re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
-		switch req.Method {
-		case "GET":
-			switch {
-			case re1.MatchString(req.URL.Path):
-				// inspect container - /containers/{id}/json
-				parsePath := re1.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on container ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					switch parsePath[2] {
-					case "idwithnolabel":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", parsePath[2])))
-					case "idwithlabel1":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", parsePath[2])))
-					default:
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", parsePath[2])))
-					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
-				}
-			case re2.MatchString(req.URL.Path):
-				// inspect image - /images/{id}/json
-				parsePath := re2.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on image ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					switch parsePath[2] {
-					case "idwithnolabel":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{}}}", parsePath[2])))
-					case "idwithlabel1":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}}", parsePath[2])))
-					default:
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"no such image: %s: No such image: %s:latest\"}", parsePath[2], parsePath[2])))
-					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
-				}
-			case re3.MatchString(req.URL.Path):
-				// inspect network - /networks/{id}
-				parsePath := re3.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on network ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					switch parsePath[2] {
-					case "idwithnolabel":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{}}", parsePath[2])))
-					case "idwithlabel1":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}", parsePath[2])))
-					default:
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
-					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
-				}
-			case re4.MatchString(req.URL.Path):
-				// inspect volume - /volume/{name}
-				parsePath := re4.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on volume name (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					switch parsePath[2] {
-					case "namewithnolabel":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{}}", parsePath[2])))
-					case "namewithlabel1":
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{\"com.buildkite.sockguard.owner\":\"test-owner\"}}", parsePath[2])))
-					default:
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"get %s: no such volume\"}", parsePath[2])))
-					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing volume name from path - %s\n", req.URL.Path)))
-				}
-			default:
-				resp.StatusCode = 501
-				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
-			}
-		default:
-			resp.StatusCode = 501
-			resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
-		}
-		return &resp
-	})
+
+	// Pre-populated simplified upstream state that "exists" before tests execute.
+	us := upstreamState{
+		containers: map[string]upstreamStateContainer{
+			"idwithnolabel": upstreamStateContainer{
+				// Empty owner = no label
+				owner: "",
+			},
+			"idwithlabel1": upstreamStateContainer{
+				owner: "test-owner",
+			},
+		},
+		images: map[string]upstreamStateImage{
+			"idwithnolabel": upstreamStateImage{
+				// Empty owner = no label
+				owner: "",
+			},
+			"idwithlabel1": upstreamStateImage{
+				owner: "test-owner",
+			},
+		},
+		networks: map[string]upstreamStateNetwork{
+			"idwithnolabel": upstreamStateNetwork{
+				// Empty owner = no label
+				owner: "",
+			},
+			"idwithlabel1": upstreamStateNetwork{
+				owner: "test-owner",
+			},
+		},
+		volumes: map[string]upstreamStateVolume{
+			"namewithnolabel": upstreamStateVolume{
+				// Empty owner = no label
+				owner: "",
+			},
+			"namewithlabel1": upstreamStateVolume{
+				owner: "test-owner",
+			},
+		},
+	}
+
+	r := mockRulesDirectorWithUpstreamState(&us)
 
 	tests := map[string]struct {
 		Type      string

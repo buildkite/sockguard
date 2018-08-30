@@ -424,15 +424,26 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 
 func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ok, err := r.checkOwner(l, "networks", true, req)
+		if ok == false {
+			errMsg := fmt.Sprintf("Deleting network denied, no error")
+			if err != nil {
+				errMsg = fmt.Sprintf("Deleting network denied: %s", err.Error())
+			}
+			l.Printf(errMsg)
+			http.Error(w, errMsg, http.StatusUnauthorized)
+			return
+		}
+
 		// If ContainerDockerLink is enabled, detach the container from the network before deleting
 		if r.ContainerDockerLink != "" {
 			// Parse out the Network ID (or Name) to use for detaching linked container
 			splitPath := strings.Split(req.URL.String(), "/")
-			if len(splitPath) != 3 {
-				http.Error(w, fmt.Sprintf("Unable to parse out URL '%s', expected 3 components, got %d", req.URL.String(), len(splitPath)), http.StatusBadRequest)
+			if len(splitPath) != 4 {
+				http.Error(w, fmt.Sprintf("Unable to parse out URL '%s', expected 4 components, got %d", req.URL.String(), len(splitPath)), http.StatusBadRequest)
 				return
 			}
-			networkIdOrName := splitPath[2]
+			networkIdOrName := splitPath[3]
 
 			// Parse the ContainerDockerLink out
 			cdl, err := splitContainerDockerLink(r.ContainerDockerLink)

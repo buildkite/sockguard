@@ -25,12 +25,10 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // Reusable mock rulesDirector instance
-func mockRulesDirector(tfn roundTripFunc) *rulesDirector {
+func mockRulesDirector() *rulesDirector {
 	return &rulesDirector{
-		Client: &http.Client{
-			Transport: roundTripFunc(tfn),
-		},
-		Owner: "test-owner",
+		Client: &http.Client{},
+		Owner:  "test-owner",
 		AllowHostModeNetworking: false,
 	}
 }
@@ -38,101 +36,109 @@ func mockRulesDirector(tfn roundTripFunc) *rulesDirector {
 // Reusable mock rulesDirector instance - with "state" management of mocked upstream Docker daemon
 // Just containers/networks initially
 func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
-	return mockRulesDirector(func(req *http.Request) *http.Response {
-		resp := http.Response{
-			// Must be set to non-nil value or it panics
-			Header: make(http.Header),
-		}
-		re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
-		re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
-		re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
-		re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
-		switch req.Method {
-		// TODO: add basic POST + DELETE support, using upstream state
-		case "GET":
-			switch {
-			case re1.MatchString(req.URL.Path):
-				// inspect container - /containers/{id}/json
-				parsePath := re1.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on container ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					if us.doesContainerExist(parsePath[2]) == false {
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", parsePath[2])))
+	rd := mockRulesDirector()
+	rd.Client = mockRulesDirectorHttpClientWithUpstreamState(us)
+	return rd
+}
+
+func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) *http.Response {
+			resp := http.Response{
+				// Must be set to non-nil value or it panics
+				Header: make(http.Header),
+			}
+			re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
+			re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
+			re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
+			re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
+			switch req.Method {
+			// TODO: add basic POST + DELETE support, using upstream state
+			case "GET":
+				switch {
+				case re1.MatchString(req.URL.Path):
+					// inspect container - /containers/{id}/json
+					parsePath := re1.FindStringSubmatch(req.URL.Path)
+					if len(parsePath) == 3 {
+						// Vary the response based on container ID (easiest option)
+						// Partial JSON result, enough to satisfy the inspectLabels() struct
+						if us.doesContainerExist(parsePath[2]) == false {
+							resp.StatusCode = 404
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"No such container: %s\"}", parsePath[2])))
+						} else {
+							containerOwnerLabel := us.ownerLabelContent(us.getContainerOwner(parsePath[2]))
+							resp.StatusCode = 200
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], containerOwnerLabel)))
+						}
 					} else {
-						containerOwnerLabel := us.ownerLabelContent(us.getContainerOwner(parsePath[2]))
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], containerOwnerLabel)))
+						resp.StatusCode = 501
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
 					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
-				}
-			case re2.MatchString(req.URL.Path):
-				// inspect image - /images/{id}/json
-				parsePath := re2.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on image ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					if us.doesImageExist(parsePath[2]) == false {
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"no such image: %s: No such image: %s:latest\"}", parsePath[2], parsePath[2])))
+				case re2.MatchString(req.URL.Path):
+					// inspect image - /images/{id}/json
+					parsePath := re2.FindStringSubmatch(req.URL.Path)
+					if len(parsePath) == 3 {
+						// Vary the response based on image ID (easiest option)
+						// Partial JSON result, enough to satisfy the inspectLabels() struct
+						if us.doesImageExist(parsePath[2]) == false {
+							resp.StatusCode = 404
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"no such image: %s: No such image: %s:latest\"}", parsePath[2], parsePath[2])))
+						} else {
+							imageOwnerLabel := us.ownerLabelContent(us.getImageOwner(parsePath[2]))
+							resp.StatusCode = 200
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], imageOwnerLabel)))
+						}
 					} else {
-						imageOwnerLabel := us.ownerLabelContent(us.getImageOwner(parsePath[2]))
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Config\":{\"Labels\":{%s}}}", parsePath[2], imageOwnerLabel)))
+						resp.StatusCode = 501
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
 					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
-				}
-			case re3.MatchString(req.URL.Path):
-				// inspect network - /networks/{id}
-				parsePath := re3.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on network ID (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					if us.doesNetworkExist(parsePath[2]) == false {
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+				case re3.MatchString(req.URL.Path):
+					// inspect network - /networks/{id}
+					parsePath := re3.FindStringSubmatch(req.URL.Path)
+					if len(parsePath) == 3 {
+						// Vary the response based on network ID (easiest option)
+						// Partial JSON result, enough to satisfy the inspectLabels() struct
+						if us.doesNetworkExist(parsePath[2]) == false {
+							resp.StatusCode = 404
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+						} else {
+							networkOwnerLabel := us.ownerLabelContent(us.getNetworkOwner(parsePath[2]))
+							resp.StatusCode = 200
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{%s}}", parsePath[2], networkOwnerLabel)))
+						}
 					} else {
-						networkOwnerLabel := us.ownerLabelContent(us.getNetworkOwner(parsePath[2]))
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{%s}}", parsePath[2], networkOwnerLabel)))
+						resp.StatusCode = 501
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
 					}
-				} else {
-					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
-				}
-			case re4.MatchString(req.URL.Path):
-				// inspect volume - /volume/{name}
-				parsePath := re4.FindStringSubmatch(req.URL.Path)
-				if len(parsePath) == 3 {
-					// Vary the response based on volume name (easiest option)
-					// Partial JSON result, enough to satisfy the inspectLabels() struct
-					if us.doesVolumeExist(parsePath[2]) == false {
-						resp.StatusCode = 404
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"get %s: no such volume\"}", parsePath[2])))
+				case re4.MatchString(req.URL.Path):
+					// inspect volume - /volume/{name}
+					parsePath := re4.FindStringSubmatch(req.URL.Path)
+					if len(parsePath) == 3 {
+						// Vary the response based on volume name (easiest option)
+						// Partial JSON result, enough to satisfy the inspectLabels() struct
+						if us.doesVolumeExist(parsePath[2]) == false {
+							resp.StatusCode = 404
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"get %s: no such volume\"}", parsePath[2])))
+						} else {
+							volumeOwnerLabel := us.ownerLabelContent(us.getVolumeOwner(parsePath[2]))
+							resp.StatusCode = 200
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{%s}}", parsePath[2], volumeOwnerLabel)))
+						}
 					} else {
-						volumeOwnerLabel := us.ownerLabelContent(us.getVolumeOwner(parsePath[2]))
-						resp.StatusCode = 200
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Name\":\"%s\",\"Labels\":{%s}}", parsePath[2], volumeOwnerLabel)))
+						resp.StatusCode = 501
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing volume name from path - %s\n", req.URL.Path)))
 					}
-				} else {
+				default:
 					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing volume name from path - %s\n", req.URL.Path)))
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
 				}
 			default:
 				resp.StatusCode = 501
-				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
+				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
 			}
-		default:
-			resp.StatusCode = 501
-			resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
-		}
-		return &resp
-	})
+			return &resp
+		}),
+	}
 }
 
 // Reusable mock log.Logger instance
@@ -142,7 +148,7 @@ func mockLogger() *log.Logger {
 
 func TestAddLabelsToQueryStringFilters(t *testing.T) {
 	l := mockLogger()
-	r := mockRulesDirector(func(req *http.Request) *http.Response { return &http.Response{} })
+	r := mockRulesDirector()
 
 	// key = client side URL (inc query params)
 	// value = expected request URL on upstream side (inc query params)
@@ -599,40 +605,9 @@ func TestHandleNetworkCreate(t *testing.T) {
 
 func TestHandleNetworkDelete(t *testing.T) {
 	l := mockLogger()
-	// Key = the network name that will be deleted (or attempted)
-	tests := map[string]handleCreateTests{
-		// Defaults (owner label matches, should pass)
-		"somenetwork": handleCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-			},
-			esc: 200,
-		},
-		// Defaults (owner label does not match, should fail)
-		"anothernetwork": handleCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-			},
-			esc: 401,
-		},
-		// Defaults + -docker-link enabled
-		"whatevernetwork": handleCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner:               "sockguard-pid-1",
-				ContainerDockerLink: "eeee:ffff",
-			},
-			esc: 200,
-		},
-	}
 
 	// Pre-populated simplified upstream state that "exists" before tests execute.
-	/*us := upstreamState{
+	us := upstreamState{
 		containers: map[string]upstreamStateContainer{
 			"ciagentcontainer": upstreamStateContainer{
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
@@ -654,18 +629,45 @@ func TestHandleNetworkDelete(t *testing.T) {
 				owner: "sockguard-pid-1",
 			},
 		},
-	}*/
+	}
 
-	reqUrl := "/v1.37/networks/networktodelete"
-	expectedUrl := "/v1.37/networks/networktodelete"
+	// Key = the network name that will be deleted (or attempted)
+	tests := map[string]handleCreateTests{
+		// Defaults (owner label matches, should pass)
+		"somenetwork": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+		// Defaults (owner label does not match, should fail)
+		"anothernetwork": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 401,
+		},
+		// Defaults + -docker-link enabled
+		"whatevernetwork": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "eeee:ffff",
+			},
+			esc: 200,
+		},
+	}
 
 	pathIdRegex := regexp.MustCompile("^/v(.*)/networks/(.*)$")
 	// TODOLATER: consolidate/DRY this with TestHandleContainerCreate()?
 	for k, v := range tests {
-		expectedReqJson, err := loadFixtureFile(fmt.Sprintf("%s_expected", k))
-		if err != nil {
-			t.Fatal(err)
-		}
+		reqUrl := fmt.Sprintf("/v1.37/networks/%s", k)
+		expectedUrl := fmt.Sprintf("/v1.37/networks/%s", k)
 		upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != "DELETE" {
 				t.Errorf("%s : Expected HTTP method DELETE got %s", k, req.Method)
@@ -676,14 +678,8 @@ func TestHandleNetworkDelete(t *testing.T) {
 			if req.URL.String() != expectedUrl {
 				t.Errorf("%s : Expected URL %s got %s", k, expectedUrl, req.URL.String())
 			}
-			// Validate the body has been modified as expected
-			body, err := ioutil.ReadAll(req.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(body) != string(expectedReqJson) {
-				t.Errorf("%s : Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", k, string(expectedReqJson), string(body))
-			}
+
+			// No request body for these DELETE calls
 
 			// Parse out request URI
 			if pathIdRegex.MatchString(req.URL.Path) == false {
@@ -693,26 +689,25 @@ func TestHandleNetworkDelete(t *testing.T) {
 			if len(parsePath) != 3 {
 				t.Fatalf("%s : URL path regex split mismatch, expected 3 got %d", k, len(parsePath))
 			}
-			// network id/name = parsePath[2]
 
-			// TODO: manipulate "us" according to received request
+			// "Delete" the network (from mocked upstream state)
+			err := us.deleteNetwork(parsePath[2])
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			// Return empty JSON, the request is whats important not the response
 			fmt.Fprintf(w, `{}`)
 		})
 		// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
 		// Create a request to pass to our handler
-		containerCreateJson, err := loadFixtureFile(fmt.Sprintf("%s_in", k))
-		if err != nil {
-			t.Fatal(err)
-		}
-		req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
+		req, err := http.NewRequest("DELETE", reqUrl, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
-		handler := v.rd.handleNetworkCreate(l, req, upstream)
+		handler := v.rd.handleNetworkDelete(l, req, upstream)
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
 		handler.ServeHTTP(rr, req)
@@ -727,7 +722,13 @@ func TestHandleNetworkDelete(t *testing.T) {
 				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
 			}
 		}
-		// TODO: verify the network was deleted from upstreamState (if applicable)
+
+		// Verify the network was deleted from mock upstream state (or not deleted on error)
+		if rr.Code == 200 && us.doesNetworkExist(k) != false {
+			t.Errorf("%s : %d response code, but network still exists, should have been deleted from mock upstream state", k, rr.Code)
+		} else if rr.Code != 200 && us.doesNetworkExist(k) == false {
+			t.Errorf("%s : %d response code, but network does not exist, should not have been deleted", k, rr.Code)
+		}
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}

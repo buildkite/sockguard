@@ -44,8 +44,6 @@ func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
 func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Client {
 	return &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) *http.Response {
-			// fmt.Printf("Upstream State Mock: %s %s\n", req.Method, req.URL.Path)
-
 			resp := http.Response{
 				// Must be set to non-nil value or it panics
 				Header: make(http.Header),
@@ -126,8 +124,7 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 					}
 				case "POST":
 					switch parsePath[3] {
-					case "/connect":
-					case "/disconnect":
+					case "/connect", "/disconnect":
 						// connect container to network - /networks/{id}/connect
 						// disconnect container to network - /networks/{id}/disconnect
 						// TODO: parse out Container from request body
@@ -692,8 +689,6 @@ func TestHandleNetworkCreate(t *testing.T) {
 				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
 			}
 		}
-
-		fmt.Printf("Upstream State: %+v\n", us)
 
 		// Verify the network was added to upstreamState
 		if rr.Code == 200 && us.doesNetworkExist(inNewNetworkName) == false {

@@ -49,14 +49,13 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 				Header: make(http.Header),
 			}
 			re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
+			// TODOLATER: adjust re2 to make /json suffix optional, for non-GET?
 			re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
-			re3 := regexp.MustCompile("^/v(.*)/networks/(.*)$")
+			re3 := regexp.MustCompile("^/v(.*)/networks/(.*)(/connect|disconnect)?$")
 			re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
-			switch req.Method {
-			// TODO: add basic POST + DELETE support, using upstream state
-			case "GET":
-				switch {
-				case re1.MatchString(req.URL.Path):
+			switch {
+			case re1.MatchString(req.URL.Path):
+				if req.Method == "GET" {
 					// inspect container - /containers/{id}/json
 					parsePath := re1.FindStringSubmatch(req.URL.Path)
 					if len(parsePath) == 3 {
@@ -74,7 +73,13 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 						resp.StatusCode = 501
 						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing container ID from path - %s\n", req.URL.Path)))
 					}
-				case re2.MatchString(req.URL.Path):
+				} else {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unsupported HTTP method %s for %s\n", req.Method, req.URL.Path)))
+				}
+			case re2.MatchString(req.URL.Path):
+				switch req.Method {
+				case "GET":
 					// inspect image - /images/{id}/json
 					parsePath := re2.FindStringSubmatch(req.URL.Path)
 					if len(parsePath) == 3 {
@@ -92,7 +97,13 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 						resp.StatusCode = 501
 						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing image ID from path - %s\n", req.URL.Path)))
 					}
-				case re3.MatchString(req.URL.Path):
+				default:
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unsupported HTTP method %s for %s\n", req.Method, req.URL.Path)))
+				}
+			case re3.MatchString(req.URL.Path):
+				switch req.Method {
+				case "GET":
 					// inspect network - /networks/{id}
 					parsePath := re3.FindStringSubmatch(req.URL.Path)
 					if len(parsePath) == 3 {
@@ -110,7 +121,25 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 						resp.StatusCode = 501
 						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
 					}
-				case re4.MatchString(req.URL.Path):
+				case "DELETE":
+					// delete network - /networks/{id}
+					parsePath := re3.FindStringSubmatch(req.URL.Path)
+					// Bare minimum response format here, mostly response code
+					if us.doesNetworkExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+					} else {
+						us.deleteNetwork(parsePath[2])
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString("OK"))
+					}
+				default:
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unsupported HTTP method %s for %s\n", req.Method, req.URL.Path)))
+				}
+			case re4.MatchString(req.URL.Path):
+				switch req.Method {
+				case "GET":
 					// inspect volume - /volume/{name}
 					parsePath := re4.FindStringSubmatch(req.URL.Path)
 					if len(parsePath) == 3 {
@@ -130,11 +159,11 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 					}
 				default:
 					resp.StatusCode = 501
-					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unsupported HTTP method %s for %s\n", req.Method, req.URL.Path)))
 				}
 			default:
 				resp.StatusCode = 501
-				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled method - %s to %s\n", req.Method, req.URL.Path)))
+				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
 			}
 			return &resp
 		}),

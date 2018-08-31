@@ -24,6 +24,29 @@ func init() {
 	flag.BoolVar(&debug, "debug", false, "Show debugging logging for the socket")
 }
 
+// For -join-network startup pre-check
+func checkContainerExists(client *http.Client, idOrName string) (bool, error) {
+	inspectReq, err := http.NewRequest("GET", fmt.Sprintf("http://unix/v%s/containers/%s/json", apiVersion, idOrName), nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := client.Do(inspectReq)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		// Exists
+		return true, nil
+	} else if resp.StatusCode == http.StatusNotFound {
+		// Does not exist
+		return false, nil
+	} else {
+		return false, fmt.Errorf("Unexpected response code %d received from Docker daemon when checking if Container '%s' exists", resp.StatusCode, idOrName)
+	}
+}
+
 func main() {
 	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
 	socketMode := flag.String("mode", "0600", "Permissions of the guarded socket")
@@ -36,6 +59,7 @@ func main() {
 	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value on new containers")
 	user := flag.String("user", "", "Forces --user on containers")
 	dockerLink := flag.String("docker-link", "", "Add a Docker --link from any spawned containers to another container")
+	containerJoinNetwork := flag.String("container-join-network", "", "Always connect this container to new user defined bridge networks (and disconnect on delete)")
 	flag.Parse()
 
 	if debug {
@@ -72,8 +96,33 @@ func main() {
 		debugf("Setting CgroupParent on new containers to '%s'", *cgroupParent)
 	}
 
+	// These should not be used together, one or the other
+	if *dockerLink != "" && *containerJoinNetwork != "" {
+		log.Fatal("Error: -docker-link and -join-network should not be used together.")
+	}
+
 	if *dockerLink != "" {
 		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
+	}
+
+	proxyHttpClient := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				debugf("Dialing directly")
+				return net.Dial("unix", *upstream)
+			},
+		},
+	}
+
+	if *containerJoinNetwork != "" {
+		joinNetworkContainerExists, err := checkContainerExists(&proxyHttpClient, *containerJoinNetwork)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		if joinNetworkContainerExists == false {
+			log.Fatalf("Error: -container-join-network '%s' specified but this container does not exist", *containerJoinNetwork)
+		}
+		debugf("Container '%s' will always be connected to user defined bridged networks created via sockguard", *containerJoinNetwork)
 	}
 
 	proxy := socketproxy.New(*upstream, &rulesDirector{
@@ -81,16 +130,10 @@ func main() {
 		AllowHostModeNetworking: *allowHostModeNetworking,
 		ContainerCgroupParent:   *cgroupParent,
 		ContainerDockerLink:     *dockerLink,
+		ContainerJoinNetwork:    *containerJoinNetwork,
 		Owner:                   *owner,
 		User:                    *user,
-		Client: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					debugf("Dialing directly")
-					return net.Dial("unix", *upstream)
-				},
-			},
-		},
+		Client:                  &proxyHttpClient,
 	})
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {

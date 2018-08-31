@@ -1,0 +1,1 @@
+{"CheckDuplicate":true,"Driver":"bridge","Scope":"","EnableIPv6":false,"IPAM":{"Driver":"default","Options":{},"Config":[]},"Internal":false,"Attachable":false,"Ingress":false,"ConfigOnly":false,"ConfigFrom":null,"Options":{},"Labels":{},"Name":"alwaysjoinnetwork"}

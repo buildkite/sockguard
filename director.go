@@ -31,8 +31,10 @@ type rulesDirector struct {
 	AllowBinds              []string
 	AllowHostModeNetworking bool
 	ContainerCgroupParent   string
-	ContainerDockerLink     string
-	User                    string
+	// TODOLATER: some enforcement at the struct level to ensure DockerLink + JoinNetwork are mutually exclusive (pick one)
+	ContainerDockerLink  string
+	ContainerJoinNetwork string
+	User                 string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {
@@ -367,7 +369,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// Get the newly created network name from original request, for use later (if ContainerDockerLink is enabled)
+		// Get the newly created network name from original request, for use later (if ContainerDockerLink or ContainerJoinNetwork is enabled)
 		networkIdOrName, ok := decoded["Name"].(string)
 		if ok == false {
 			http.Error(w, "Failed to obtain network name from request", http.StatusBadRequest)
@@ -389,19 +391,25 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 		// Do the network creation
 		upstream.ServeHTTP(w, req)
 
-		// If ContainerDockerLink is enabled, link the container to the newly created network
-		if r.ContainerDockerLink != "" {
+		// If ContainerDockerLink or ContainerJoinNetwork is enabled, link the container to the newly created network
+		if r.ContainerDockerLink != "" || r.ContainerJoinNetwork != "" {
 			// We have networkIdOrName already, see above
 
-			// Parse the ContainerDockerLink out
-			cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+			useContainer := ""
+			if r.ContainerDockerLink != "" {
+				// Parse the ContainerDockerLink out
+				cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				useContainer = cdl.Container
+			} else if r.ContainerJoinNetwork != "" {
+				useContainer = r.ContainerJoinNetwork
 			}
 
 			// Do the container attach
-			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", cdl.Container)
+			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", useContainer)
 			attachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/connect", apiVersion, networkIdOrName), strings.NewReader(attachJson))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -413,11 +421,11 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 				return
 			}
 			if attachResp.StatusCode != 200 {
-				http.Error(w, fmt.Sprintf("Expected 200 got %d when attaching Container ID/Name '%s' to Network '%s' (after creating)", attachResp.StatusCode, cdl.Container, networkIdOrName), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf("Expected 200 got %d when attaching Container ID/Name '%s' to Network '%s' (after creating)", attachResp.StatusCode, useContainer, networkIdOrName), http.StatusBadRequest)
 				return
 			}
 			// Attached, move on
-			l.Printf("Attached Container ID/Name '%s' to Network '%s' (after creating)", cdl.Container, networkIdOrName)
+			l.Printf("Attached Container ID/Name '%s' to Network '%s' (after creating)", useContainer, networkIdOrName)
 		}
 	})
 }
@@ -435,8 +443,8 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 			return
 		}
 
-		// If ContainerDockerLink is enabled, detach the container from the network before deleting
-		if r.ContainerDockerLink != "" {
+		// If ContainerDockerLink or ContainerJoinNetwork is enabled, detach the container from the network before deleting
+		if r.ContainerDockerLink != "" || r.ContainerJoinNetwork != "" {
 			// Parse out the Network ID (or Name) to use for detaching linked container
 			splitPath := strings.Split(req.URL.String(), "/")
 			if len(splitPath) != 4 {
@@ -445,15 +453,21 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 			}
 			networkIdOrName := splitPath[3]
 
-			// Parse the ContainerDockerLink out
-			cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+			useContainer := ""
+			if r.ContainerDockerLink != "" {
+				// Parse the ContainerDockerLink out
+				cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				useContainer = cdl.Container
+			} else if r.ContainerJoinNetwork != "" {
+				useContainer = r.ContainerJoinNetwork
 			}
 
 			// Do the container detach (forced, so we can delete the network)
-			detachJson := fmt.Sprintf("{\"Container\":\"%s\",\"Force\":true}", cdl.Container)
+			detachJson := fmt.Sprintf("{\"Container\":\"%s\",\"Force\":true}", useContainer)
 			detachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/disconnect", apiVersion, networkIdOrName), strings.NewReader(detachJson))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -465,11 +479,11 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 				return
 			}
 			if detachResp.StatusCode != 200 {
-				http.Error(w, fmt.Sprintf("Expected 200 got %d when detaching Container ID/Name '%s' from Network '%s' (before deleting)", detachResp.StatusCode, cdl.Container, networkIdOrName), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf("Expected 200 got %d when detaching Container ID/Name '%s' from Network '%s' (before deleting)", detachResp.StatusCode, useContainer, networkIdOrName), http.StatusBadRequest)
 				return
 			}
 			// Detached, move on
-			l.Printf("Detached Container ID/Name '%s' from Network '%s' (before deleting)", cdl.Container, networkIdOrName)
+			l.Printf("Detached Container ID/Name '%s' from Network '%s' (before deleting)", useContainer, networkIdOrName)
 		}
 
 		// Do the network delete

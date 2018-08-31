@@ -127,7 +127,6 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 					case "/connect", "/disconnect":
 						// connect container to network - /networks/{id}/connect
 						// disconnect container to network - /networks/{id}/disconnect
-						// TODO: parse out Container from request body
 						var decoded map[string]interface{}
 						if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
 							resp.StatusCode = 500
@@ -435,31 +434,6 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 	}
 
-	// Pre-populated simplified upstream state that "exists" before tests execute.
-	// Used for a few tests (eg. -docker-link - fixtures _11, _12, _14)
-	/*
-		us := upstreamState{
-			containers: map[string]upstreamStateContainer{
-				"ciagentcontainer": upstreamStateContainer{
-					// No ownership checking at this level (intentionally), due to chicken-and-egg situation
-					// (CI container is a sibling/sidecar of sockguard itself, not a child)
-					owner: "foreign",
-					attachedNetworks: []string{
-						"whatevernetwork",
-					},
-				},
-			},
-			networks: map[string]upstreamStateNetwork{
-				"somenetwork": upstreamStateNetwork{
-					owner: "sockguard-pid-1",
-				},
-				"whatevernetwork": upstreamStateNetwork{
-					owner: "sockguard-pid-1",
-				},
-			},
-		}
-	*/
-
 	reqUrl := "/v1.37/containers/create"
 	expectedUrl := "/v1.37/containers/create"
 
@@ -489,6 +463,9 @@ func TestHandleContainerCreate(t *testing.T) {
 			if string(body) != string(expectedReqJson) {
 				t.Errorf("%s : Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", k, string(expectedReqJson), string(body))
 			}
+
+			// TODOLATER: append to "us" (upstream state) the new container, and any connected networks? we only check the ciagentcontainer
+			// when verifying state further down right now, which is the key consideration.
 
 			// Return empty JSON, the request is whats important not the response
 			fmt.Fprintf(w, `{}`)
@@ -524,11 +501,8 @@ func TestHandleContainerCreate(t *testing.T) {
 			}
 		}
 
-		// Check the ContainerDockerLink worked as expected (network connect), if enabled + a user defined bridge network was requested
-		if v.rd.ContainerDockerLink != "" {
-			t.Error("TODO: Missing coverage")
-			// TODO: implement
-		}
+		// State of ciagentcontainer network attachments is not relevant for a general container creation call,
+		// only matters for network create/delete.
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}
@@ -598,6 +572,16 @@ func TestHandleNetworkCreate(t *testing.T) {
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
 				ContainerDockerLink: "ciagentcontainer:cccc",
+			},
+			esc: 200,
+		},
+		// Defaults + -join-network enabled
+		"networks_create_3": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:                "sockguard-pid-1",
+				ContainerJoinNetwork: "ciagentcontainer",
 			},
 			esc: 200,
 		},
@@ -698,7 +682,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 		}
 
 		// Verify the ciagentcontainer was connected to the new network (if applicable)
-		if v.rd.ContainerDockerLink != "" {
+		if v.rd.ContainerDockerLink != "" || v.rd.ContainerJoinNetwork != "" {
 			ciAgentAttachedNetworks := us.getContainerAttachedNetworks("ciagentcontainer")
 			ciAgentAttachedToNetwork := false
 			for _, vn := range ciAgentAttachedNetworks {
@@ -728,6 +712,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 				owner: "foreign",
 				attachedNetworks: []string{
 					"whatevernetwork",
+					"alwaysjoinnetwork",
 				},
 			},
 		},
@@ -739,6 +724,9 @@ func TestHandleNetworkDelete(t *testing.T) {
 				owner: "adifferentowner",
 			},
 			"whatevernetwork": upstreamStateNetwork{
+				owner: "sockguard-pid-1",
+			},
+			"alwaysjoinnetwork": upstreamStateNetwork{
 				owner: "sockguard-pid-1",
 			},
 		},
@@ -771,6 +759,16 @@ func TestHandleNetworkDelete(t *testing.T) {
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
 				ContainerDockerLink: "ciagentcontainer:ffff",
+			},
+			esc: 200,
+		},
+		// Defaults + -join-network enabled
+		"alwaysjoinnetwork": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:                "sockguard-pid-1",
+				ContainerJoinNetwork: "ciagentcontainer",
 			},
 			esc: 200,
 		},

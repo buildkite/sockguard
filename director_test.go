@@ -846,3 +846,113 @@ func TestCheckOwner(t *testing.T) {
 		}
 	}
 }
+
+type handleBuildTest struct {
+	rd *rulesDirector
+	// Expected StatusCode
+	esc int
+
+	// These are short enough, store inline rather than in fixtures files
+	inQueryString       string
+	expectedQueryString string
+}
+
+func TestHandleBuild(t *testing.T) {
+	l := mockLogger()
+	tests := []handleBuildTest{
+		// Defaults
+		handleBuildTest{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc:                 200,
+			inQueryString:       `buildargs={}&cachefrom=[]&cgroupparent=&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+			expectedQueryString: `buildargs={}&cachefrom=[]&cgroupparent=&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={"com.buildkite.sockguard.owner":"sockguard-pid-1"}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+		},
+		// Defaults + custom label
+		handleBuildTest{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc:                 200,
+			inQueryString:       `buildargs={}&cachefrom=[]&cgroupparent=&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={"somelabel":"somevalue"}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+			expectedQueryString: `buildargs={}&cachefrom=[]&cgroupparent=&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={"com.buildkite.sockguard.owner":"sockguard-pid-1","somelabel":"somevalue"}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+		},
+		// Defaults + CgroupParent in config (should pass)
+		handleBuildTest{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+				ContainerCgroupParent: "somecgroup",
+			},
+			esc:                 200,
+			inQueryString:       `buildargs={}&cachefrom=[]&cgroupparent=&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+			expectedQueryString: `buildargs={}&cachefrom=[]&cgroupparent=somecgroup&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={"com.buildkite.sockguard.owner":"sockguard-pid-1"}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+		},
+		// Defaults + CgroupParent in API request (should fail)
+		handleBuildTest{
+			rd: &rulesDirector{
+				Client: &http.Client{},
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc:                 401,
+			inQueryString:       `buildargs={}&cachefrom=[]&cgroupparent=anothercgroup&cpuperiod=0&cpuquota=0&cpusetcpus=&cpusetmems=&cpushares=0&dockerfile=Dockerfile&labels={}&memory=0&memswap=0&networkmode=default&rm=1&shmsize=0&target=&ulimits=null&version=1`,
+			expectedQueryString: `<should fail and never get here>`,
+		},
+	}
+	reqUrlPath := "/v1.37/build"
+	expectedUrlPath := "/v1.37/build"
+	for _, v := range tests {
+		upstream := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// log.Printf("%s %s", req.Method, req.URL.Path)
+			// Validate the request URL path against expected.
+			if req.URL.Path != expectedUrlPath {
+				t.Error("Expected URL path", expectedUrlPath, "got", req.URL.Path)
+			}
+
+			// Validate the query string matches expected
+			unescapeQueryString, err := url.QueryUnescape(req.URL.RawQuery)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if unescapeQueryString != v.expectedQueryString {
+				t.Errorf("Expected URL query string:\n%s\nGot:\n%s\n\n", v.expectedQueryString, unescapeQueryString)
+			}
+
+			// We don't validate the request body here, as it is a build context tar (which isn't modified), not relevant
+
+			// Return empty JSON, the request is whats important not the response
+			fmt.Fprintf(w, `{}`)
+		})
+		// Credit: https://blog.questionable.services/article/testing-http-handlers-go/
+		// Create a request to pass to our handler, using an empty request body for now (not relevant)
+		r, err := http.NewRequest("POST", fmt.Sprintf("%s?%s", reqUrlPath, v.inQueryString), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
+		rr := httptest.NewRecorder()
+		handler := v.rd.handleBuild(l, r, upstream)
+		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
+		// directly and pass in our Request and ResponseRecorder.
+		handler.ServeHTTP(rr, r)
+		// Check the status code is what we expect.
+		//fmt.Printf("%s : SC %d ESC %d\n", k, rr.Code, v.esc)
+		if status := rr.Code; status != v.esc {
+			// Get the body out of the response to return with the error
+			respBody, err := ioutil.ReadAll(rr.Body)
+			if err == nil {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Response body: %s", v.inQueryString, status, v.esc, string(respBody))
+			} else {
+				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", v.inQueryString, status, v.esc, err.Error())
+			}
+		}
+		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
+	}
+}

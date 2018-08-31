@@ -44,6 +44,8 @@ func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
 func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Client {
 	return &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) *http.Response {
+			// fmt.Printf("Upstream State Mock: %s %s\n", req.Method, req.URL.Path)
+
 			resp := http.Response{
 				// Must be set to non-nil value or it panics
 				Header: make(http.Header),
@@ -51,7 +53,8 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 			re1 := regexp.MustCompile("^/v(.*)/containers/(.*)/json$")
 			// TODOLATER: adjust re2 to make /json suffix optional, for non-GET?
 			re2 := regexp.MustCompile("^/v(.*)/images/(.*)/json$")
-			re3 := regexp.MustCompile("^/v(.*)/networks/(.*)(/connect|disconnect)?$")
+			// NOTE: this regex may not cover all name variations, but will cover enough to fulfil tests
+			re3 := regexp.MustCompile("^/v(.*)/networks/([A-Za-z0-9]+)(/connect|/disconnect)?$")
 			re4 := regexp.MustCompile("^/v(.*)/volumes/(.*)$")
 			switch {
 			case re1.MatchString(req.URL.Path):
@@ -102,28 +105,65 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unsupported HTTP method %s for %s\n", req.Method, req.URL.Path)))
 				}
 			case re3.MatchString(req.URL.Path):
+				parsePath := re3.FindStringSubmatch(req.URL.Path)
+				if len(parsePath) != 4 {
+					resp.StatusCode = 501
+					resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID/target from path - %s\n", req.URL.Path)))
+					return &resp
+				}
 				switch req.Method {
 				case "GET":
 					// inspect network - /networks/{id}
-					parsePath := re3.FindStringSubmatch(req.URL.Path)
-					if len(parsePath) == 3 {
-						// Vary the response based on network ID (easiest option)
-						// Partial JSON result, enough to satisfy the inspectLabels() struct
+					// Vary the response based on network ID (easiest option)
+					// Partial JSON result, enough to satisfy the inspectLabels() struct
+					if us.doesNetworkExist(parsePath[2]) == false {
+						resp.StatusCode = 404
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
+					} else {
+						networkOwnerLabel := us.ownerLabelContent(us.getNetworkOwner(parsePath[2]))
+						resp.StatusCode = 200
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{%s}}", parsePath[2], networkOwnerLabel)))
+					}
+				case "POST":
+					switch parsePath[3] {
+					case "/connect":
+					case "/disconnect":
+						// connect container to network - /networks/{id}/connect
+						// disconnect container to network - /networks/{id}/disconnect
+						// TODO: parse out Container from request body
+						var decoded map[string]interface{}
+						if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
+							resp.StatusCode = 500
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(err.Error()))
+							return &resp
+						}
+						useContainer := decoded["Container"].(string)
+						// Bare minimum response format here, mostly response code
 						if us.doesNetworkExist(parsePath[2]) == false {
 							resp.StatusCode = 404
 							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"network %s not found\"}", parsePath[2])))
 						} else {
-							networkOwnerLabel := us.ownerLabelContent(us.getNetworkOwner(parsePath[2]))
+							var err error
+							if parsePath[3] == "/connect" {
+								err = us.connectContainerToNetwork(useContainer, parsePath[2])
+							} else if parsePath[3] == "/disconnect" {
+								err = us.disconnectContainerToNetwork(useContainer, parsePath[2])
+							}
+							if err != nil {
+								resp.StatusCode = 500
+								resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"error %sing container '%s' to/from network '%s': %s\"}", parsePath[3], useContainer, parsePath[2], err.Error())))
+								return &resp
+							}
 							resp.StatusCode = 200
-							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"Id\":\"%s\",\"Labels\":{%s}}", parsePath[2], networkOwnerLabel)))
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString("OK"))
 						}
-					} else {
+					default:
+						// unknown
 						resp.StatusCode = 501
-						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Failure parsing network ID from path - %s\n", req.URL.Path)))
+						resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("POST not supported for %s\n", req.URL.Path)))
 					}
 				case "DELETE":
 					// delete network - /networks/{id}
-					parsePath := re3.FindStringSubmatch(req.URL.Path)
 					// Bare minimum response format here, mostly response code
 					if us.doesNetworkExist(parsePath[2]) == false {
 						resp.StatusCode = 404
@@ -163,7 +203,7 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 				}
 			default:
 				resp.StatusCode = 501
-				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Unhandled GET path - %s\n", req.URL.Path)))
+				resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("Path %s not implemented\n", req.URL.Path)))
 			}
 			return &resp
 		}),
@@ -471,8 +511,6 @@ func TestHandleContainerCreate(t *testing.T) {
 		rr := httptest.NewRecorder()
 		handler := v.rd.handleContainerCreate(l, req, upstream)
 
-		// TODO: for _11 and _12, ensure network connect was performed
-
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
 		handler.ServeHTTP(rr, req)
@@ -487,6 +525,12 @@ func TestHandleContainerCreate(t *testing.T) {
 			} else {
 				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
 			}
+		}
+
+		// Check the ContainerDockerLink worked as expected (network connect), if enabled + a user defined bridge network was requested
+		if v.rd.ContainerDockerLink != "" {
+			t.Error("TODO: Missing coverage")
+			// TODO: implement
 		}
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
@@ -523,33 +567,9 @@ func TestSplitContainerDockerLink(t *testing.T) {
 
 func TestHandleNetworkCreate(t *testing.T) {
 	l := mockLogger()
-	// For each of the tests below, there will be 2 files in the fixtures/ dir:
-	// - <key>_in.json - the client request sent to the director
-	// - <key>_expected.json - the expected request sent to the upstream
-	tests := map[string]handleCreateTests{
-		// Defaults
-		"networks_create_1": handleCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
-			},
-			esc: 200,
-		},
-		// Defaults + -docker-link enabled
-		"networks_create_2": handleCreateTests{
-			rd: &rulesDirector{
-				Client: &http.Client{},
-				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner:               "sockguard-pid-1",
-				ContainerDockerLink: "bbbb:cccc",
-			},
-			esc: 200,
-		},
-	}
 
 	// Pre-populated simplified upstream state that "exists" before tests execute.
-	/*us := upstreamState{
+	us := upstreamState{
 		containers: map[string]upstreamStateContainer{
 			"ciagentcontainer": upstreamStateContainer{
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
@@ -558,7 +578,33 @@ func TestHandleNetworkCreate(t *testing.T) {
 				attachedNetworks: []string{},
 			},
 		},
-	}*/
+		networks: map[string]upstreamStateNetwork{},
+	}
+
+	// For each of the tests below, there will be 2 files in the fixtures/ dir:
+	// - <key>_in.json - the client request sent to the director
+	// - <key>_expected.json - the expected request sent to the upstream
+	tests := map[string]handleCreateTests{
+		// Defaults
+		"networks_create_1": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner: "sockguard-pid-1",
+			},
+			esc: 200,
+		},
+		// Defaults + -docker-link enabled
+		"networks_create_2": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:               "sockguard-pid-1",
+				ContainerDockerLink: "ciagentcontainer:cccc",
+			},
+			esc: 200,
+		},
+	}
 
 	reqUrl := "/v1.37/networks/create"
 	expectedUrl := "/v1.37/networks/create"
@@ -588,13 +634,22 @@ func TestHandleNetworkCreate(t *testing.T) {
 				t.Errorf("%s : Expected request body JSON:\n%s\nGot request body JSON:\n%s\n", k, string(expectedReqJson), string(body))
 			}
 
-			// Parse out request body JSON
 			var decoded map[string]interface{}
-			err = json.Unmarshal(body, &decoded)
-			if err != nil {
+			if err := json.Unmarshal(body, &decoded); err != nil {
 				t.Fatal(err)
 			}
-			// TODO: manipulate "us" according to received request
+			newNetworkName := decoded["Name"].(string)
+			newNetworkOwner := ""
+			switch lab := decoded["Labels"].(type) {
+			case map[string]interface{}:
+				newNetworkOwner = lab["com.buildkite.sockguard.owner"].(string)
+			default:
+				t.Fatal("Error: Cannot parse Labels from request JSON on network create")
+			}
+			if us.doesNetworkExist(newNetworkName) == true {
+				t.Fatalf("Network '%s' already exists", newNetworkName)
+			}
+			us.createNetwork(newNetworkName, newNetworkOwner)
 
 			// Return empty JSON, the request is whats important not the response
 			fmt.Fprintf(w, `{}`)
@@ -605,16 +660,27 @@ func TestHandleNetworkCreate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// Parse out the new network name from containerCreateJson, for use in further checks below
+		var decodedIn map[string]interface{}
+		if err := json.Unmarshal([]byte(containerCreateJson), &decodedIn); err != nil {
+			t.Fatal(err)
+		}
+		inNewNetworkName := decodedIn["Name"].(string)
+
 		req, err := http.NewRequest("POST", reqUrl, strings.NewReader(containerCreateJson))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		handler := v.rd.handleNetworkCreate(l, req, upstream)
+
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
 		handler.ServeHTTP(rr, req)
+
 		// Check the status code is what we expect.
 		//fmt.Printf("%s : SC %d ESC %d\n", k, rr.Code, v.esc)
 		if status := rr.Code; status != v.esc {
@@ -626,7 +692,30 @@ func TestHandleNetworkCreate(t *testing.T) {
 				t.Errorf("%s : handler returned wrong status code: got %v want %v. Error reading response body: %s", k, status, v.esc, err.Error())
 			}
 		}
-		// TODO: verify the network was added to upstreamState (if applicable)
+
+		fmt.Printf("Upstream State: %+v\n", us)
+
+		// Verify the network was added to upstreamState
+		if rr.Code == 200 && us.doesNetworkExist(inNewNetworkName) == false {
+			t.Errorf("%s : %d response code, but network '%s' does not exist, should have been created in mock upstream state", k, rr.Code, inNewNetworkName)
+		} else if rr.Code != 200 && us.doesNetworkExist(inNewNetworkName) == true {
+			t.Errorf("%s : %d response code, but network '%s' exists, should not have been created", k, rr.Code, inNewNetworkName)
+		}
+
+		// Verify the ciagentcontainer was connected to the new network (if applicable)
+		if v.rd.ContainerDockerLink != "" {
+			ciAgentAttachedNetworks := us.getContainerAttachedNetworks("ciagentcontainer")
+			ciAgentAttachedToNetwork := false
+			for _, vn := range ciAgentAttachedNetworks {
+				if vn == inNewNetworkName {
+					ciAgentAttachedToNetwork = true
+					break
+				}
+			}
+			if ciAgentAttachedToNetwork == false {
+				t.Errorf("%s : network '%s' exists (or should exist), but ciagentcontainer is not attached", k, inNewNetworkName)
+			}
+		}
 
 		// Don't bother checking the response, it's not relevant in mocked context. The request side is more important here.
 	}
@@ -686,7 +775,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
-				ContainerDockerLink: "eeee:ffff",
+				ContainerDockerLink: "ciagentcontainer:ffff",
 			},
 			esc: 200,
 		},
@@ -734,12 +823,15 @@ func TestHandleNetworkDelete(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		handler := v.rd.handleNetworkDelete(l, req, upstream)
+
 		// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 		// directly and pass in our Request and ResponseRecorder.
 		handler.ServeHTTP(rr, req)
+
 		// Check the status code is what we expect.
 		//fmt.Printf("%s : SC %d ESC %d\n", k, rr.Code, v.esc)
 		if status := rr.Code; status != v.esc {
@@ -753,7 +845,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 		}
 
 		// Verify the network was deleted from mock upstream state (or not deleted on error)
-		if rr.Code == 200 && us.doesNetworkExist(k) != false {
+		if rr.Code == 200 && us.doesNetworkExist(k) == true {
 			t.Errorf("%s : %d response code, but network still exists, should have been deleted from mock upstream state", k, rr.Code)
 		} else if rr.Code != 200 && us.doesNetworkExist(k) == false {
 			t.Errorf("%s : %d response code, but network does not exist, should not have been deleted", k, rr.Code)

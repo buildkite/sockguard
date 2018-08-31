@@ -402,7 +402,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 
 			// Do the container attach
 			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", cdl.Container)
-			attachReq, err := http.NewRequest("POST", fmt.Sprintf("/networks/%s/connect", networkIdOrName), strings.NewReader(attachJson))
+			attachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/connect", apiVersion, networkIdOrName), strings.NewReader(attachJson))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -454,7 +454,7 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 
 			// Do the container detach (forced, so we can delete the network)
 			detachJson := fmt.Sprintf("{\"Container\":\"%s\",\"Force\":true}", cdl.Container)
-			detachReq, err := http.NewRequest("POST", fmt.Sprintf("/networks/%s/disconnect", networkIdOrName), strings.NewReader(detachJson))
+			detachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/disconnect", apiVersion, networkIdOrName), strings.NewReader(detachJson))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return

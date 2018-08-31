@@ -77,6 +77,10 @@ func (u *upstreamState) getContainerOwner(idOrName string) string {
 	return u.containers[idOrName].owner
 }
 
+func (u *upstreamState) getContainerAttachedNetworks(idOrName string) []string {
+	return u.containers[idOrName].attachedNetworks
+}
+
 //////////////
 // images
 

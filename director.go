@@ -410,7 +410,9 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 
 			// Do the container attach
 			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", useContainer)
-			attachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/connect", apiVersion, networkIdOrName), strings.NewReader(attachJson))
+			attachReq, err := http.NewRequest("POST", fmt.Sprintf("http://unix/v%s/networks/%s/connect", apiVersion, networkIdOrName), strings.NewReader(attachJson))
+			attachReq.Header.Set("Content-Type", "application/json")
+			//debugf("Network Connect Request: %+v\n", attachReq)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -468,7 +470,9 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 
 			// Do the container detach (forced, so we can delete the network)
 			detachJson := fmt.Sprintf("{\"Container\":\"%s\",\"Force\":true}", useContainer)
-			detachReq, err := http.NewRequest("POST", fmt.Sprintf("/v%s/networks/%s/disconnect", apiVersion, networkIdOrName), strings.NewReader(detachJson))
+			detachReq, err := http.NewRequest("POST", fmt.Sprintf("http://unix/v%s/networks/%s/disconnect", apiVersion, networkIdOrName), strings.NewReader(detachJson))
+			detachReq.Header.Set("Content-Type", "application/json")
+			//debugf("Network Disconnect Request: %+v\n", detachReq)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -479,7 +483,9 @@ func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Requ
 				return
 			}
 			if detachResp.StatusCode != 200 {
-				http.Error(w, fmt.Sprintf("Expected 200 got %d when detaching Container ID/Name '%s' from Network '%s' (before deleting)", detachResp.StatusCode, useContainer, networkIdOrName), http.StatusBadRequest)
+				errString := fmt.Sprintf("Expected 200 got %d when detaching Container ID/Name '%s' from Network '%s' (before deleting)", detachResp.StatusCode, useContainer, networkIdOrName)
+				l.Printf(errString)
+				http.Error(w, errString, http.StatusBadRequest)
 				return
 			}
 			// Detached, move on

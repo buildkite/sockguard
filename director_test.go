@@ -127,6 +127,14 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 					case "/connect", "/disconnect":
 						// connect container to network - /networks/{id}/connect
 						// disconnect container to network - /networks/{id}/disconnect
+						// Verify the Content-Type = application/json, will 400 without it on Docker daemon
+						contentType := req.Header.Get("Content-Type")
+						if contentType != "application/json" {
+							resp.StatusCode = 400
+							resp.Body = ioutil.NopCloser(bytes.NewBufferString(fmt.Sprintf("{\"message\":\"Content-Type specified (%s) must be 'application/json'\"}", contentType)))
+							return &resp
+						}
+						// Parse out the Container from request body
 						var decoded map[string]interface{}
 						if err := json.NewDecoder(req.Body).Decode(&decoded); err != nil {
 							resp.StatusCode = 500

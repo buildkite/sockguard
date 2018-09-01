@@ -115,6 +115,7 @@ func main() {
 	}
 
 	if *containerJoinNetwork != "" {
+		// TODOLATER: how much does it matter that this container is running?
 		joinNetworkContainerExists, err := checkContainerExists(&proxyHttpClient, *containerJoinNetwork)
 		if err != nil {
 			log.Fatal(err.Error())

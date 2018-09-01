@@ -101,10 +101,6 @@ func main() {
 		log.Fatal("Error: -docker-link and -join-network should not be used together.")
 	}
 
-	if *dockerLink != "" {
-		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
-	}
-
 	proxyHttpClient := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -112,6 +108,25 @@ func main() {
 				return net.Dial("unix", *upstream)
 			},
 		},
+	}
+
+	if *dockerLink != "" {
+		// Verify the container exists before proceeding
+		splitDockerLink, err := splitContainerDockerLink(*dockerLink)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if splitDockerLink.Container == "" {
+			log.Fatal("Cannot parse -docker-link argument, empty container ID/name returned")
+		}
+		dockerLinkContainerExists, err := checkContainerExists(&proxyHttpClient, splitDockerLink.Container)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		if dockerLinkContainerExists == false {
+			log.Fatalf("Error: -docker-link '%s' specified but this container does not exist", splitDockerLink.Container)
+		}
+		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
 	}
 
 	if *containerJoinNetwork != "" {

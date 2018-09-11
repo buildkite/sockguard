@@ -18,10 +18,15 @@ type upstreamState struct {
 }
 
 type upstreamStateContainer struct {
-	owner string
-	// key = network name
-	// values = aliases (if any)
-	attachedNetworks map[string][]string
+	owner            string
+	attachedNetworks []upstreamStateContainerAttachedNetwork
+}
+
+type upstreamStateContainerAttachedNetwork struct {
+	name string
+	// Alias hostnames used to talk to this container via this attached network
+	// Can be empty. Also more than 1 container can have the same alias, and Docker will round-robin them.
+	aliases []string
 }
 
 type upstreamStateImage struct {
@@ -47,7 +52,7 @@ func (u *upstreamState) ownerLabelContent(owner string) string {
 //////////////
 // containers
 
-func (u *upstreamState) createContainer(idOrName string, theOwner string, networks []string) error {
+func (u *upstreamState) createContainer(idOrName string, theOwner string, networks []upstreamStateContainerAttachedNetwork) error {
 	// Deny if already exists
 	if u.doesContainerExist(idOrName) == true {
 		return fmt.Errorf("Cannot create container with ID/Name '%s', already exists", idOrName)
@@ -79,7 +84,7 @@ func (u *upstreamState) getContainerOwner(idOrName string) string {
 	return u.containers[idOrName].owner
 }
 
-func (u *upstreamState) getContainerAttachedNetworks(idOrName string) []string {
+func (u *upstreamState) getContainerAttachedNetworks(idOrName string) []upstreamStateContainerAttachedNetwork {
 	return u.containers[idOrName].attachedNetworks
 }
 
@@ -142,7 +147,7 @@ func (u *upstreamState) deleteNetwork(idOrName string) error {
 	// that for containers only for now.
 	for k1, v1 := range u.containers {
 		for _, v2 := range v1.attachedNetworks {
-			if v2 == idOrName {
+			if v2.name == idOrName {
 				return fmt.Errorf("Cannot delete network with ID/Name '%s', endpoint still attached (container '%s')", idOrName, k1)
 			}
 		}
@@ -174,14 +179,14 @@ func (u *upstreamState) networkConnectDisconnectChecks(containerIdOrName string,
 func (u *upstreamState) isContainerConnectedToNetwork(containerIdOrName string, networkIdOrName string) bool {
 	// TODOLATER: check the container exists before proceeding? considering what's executing this, skipping duplication for now
 	for _, v := range u.containers[containerIdOrName].attachedNetworks {
-		if v == networkIdOrName {
+		if v.name == networkIdOrName {
 			return true
 		}
 	}
 	return false
 }
 
-func (u *upstreamState) connectContainerToNetwork(containerIdOrName string, networkIdOrName string) error {
+func (u *upstreamState) connectContainerToNetwork(containerIdOrName string, networkIdOrName string, containerAliases []string) error {
 	// Deny if container or network does not exist
 	if err := u.networkConnectDisconnectChecks(containerIdOrName, networkIdOrName); err != nil {
 		return fmt.Errorf("Cannot connect container '%s' to network '%s', %s", containerIdOrName, networkIdOrName, err.Error())
@@ -192,7 +197,11 @@ func (u *upstreamState) connectContainerToNetwork(containerIdOrName string, netw
 	}
 	// "Connect" the container to the network
 	container := u.containers[containerIdOrName]
-	container.attachedNetworks = append(container.attachedNetworks, networkIdOrName)
+	containerNetwork := upstreamStateContainerAttachedNetwork{
+		name:    networkIdOrName,
+		aliases: containerAliases,
+	}
+	container.attachedNetworks = append(container.attachedNetworks, containerNetwork)
 	u.containers[containerIdOrName] = container
 	return nil
 }
@@ -207,9 +216,9 @@ func (u *upstreamState) disconnectContainerToNetwork(containerIdOrName string, n
 		return fmt.Errorf("Cannot disconnect container '%s' from network '%s', not attached", containerIdOrName, networkIdOrName)
 	}
 	// "Disconnect" the container from the network
-	newAttachedNetworks := []string{}
+	newAttachedNetworks := []upstreamStateContainerAttachedNetwork{}
 	for _, v := range u.containers[containerIdOrName].attachedNetworks {
-		if v != networkIdOrName {
+		if v.name != networkIdOrName {
 			newAttachedNetworks = append(newAttachedNetworks, v)
 		}
 	}

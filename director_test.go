@@ -27,8 +27,8 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 // Reusable mock rulesDirector instance
 func mockRulesDirector() *rulesDirector {
 	return &rulesDirector{
-		Client: &http.Client{},
-		Owner:  "test-owner",
+		Client:                  &http.Client{},
+		Owner:                   "test-owner",
 		AllowHostModeNetworking: false,
 	}
 }
@@ -149,6 +149,7 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 						} else {
 							var err error
 							if parsePath[3] == "/connect" {
+								// TODO: pass through aliases if specified
 								err = us.connectContainerToNetwork(useContainer, parsePath[2])
 							} else if parsePath[3] == "/disconnect" {
 								err = us.disconnectContainerToNetwork(useContainer, parsePath[2])
@@ -357,7 +358,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
+				Owner:                   "sockguard-pid-1",
 				AllowHostModeNetworking: true,
 			},
 			esc: 200,
@@ -367,7 +368,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
+				Owner:                   "sockguard-pid-1",
 				AllowHostModeNetworking: false,
 			},
 			esc: 401,
@@ -377,7 +378,7 @@ func TestHandleContainerCreate(t *testing.T) {
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
+				Owner:                 "sockguard-pid-1",
 				ContainerCgroupParent: "some-cgroup",
 			},
 			esc: 200,
@@ -554,7 +555,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
 				// (CI container is a sibling/sidecar of sockguard itself, not a child)
 				owner:            "foreign",
-				attachedNetworks: []string{},
+				attachedNetworks: []upstreamStateContainerAttachedNetwork{},
 			},
 		},
 		networks: map[string]upstreamStateNetwork{},
@@ -694,7 +695,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 			ciAgentAttachedNetworks := us.getContainerAttachedNetworks("ciagentcontainer")
 			ciAgentAttachedToNetwork := false
 			for _, vn := range ciAgentAttachedNetworks {
-				if vn == inNewNetworkName {
+				if vn.name == inNewNetworkName {
 					ciAgentAttachedToNetwork = true
 					break
 				}
@@ -718,9 +719,13 @@ func TestHandleNetworkDelete(t *testing.T) {
 				// No ownership checking at this level (intentionally), due to chicken-and-egg situation
 				// (CI container is a sibling/sidecar of sockguard itself, not a child)
 				owner: "foreign",
-				attachedNetworks: []string{
-					"whatevernetwork",
-					"alwaysjoinnetwork",
+				attachedNetworks: []upstreamStateContainerAttachedNetwork{
+					upstreamStateContainerAttachedNetwork{
+						name: "whatevernetwork",
+					},
+					upstreamStateContainerAttachedNetwork{
+						name: "alwaysjoinnetwork",
+					},
 				},
 			},
 		},
@@ -980,7 +985,7 @@ func TestHandleBuild(t *testing.T) {
 			rd: &rulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
-				Owner: "sockguard-pid-1",
+				Owner:                 "sockguard-pid-1",
 				ContainerCgroupParent: "somecgroup",
 			},
 			esc:                 200,

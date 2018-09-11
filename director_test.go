@@ -151,13 +151,17 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 							if parsePath[3] == "/connect" {
 								useContainerAliases := []string{}
 								// If there are Aliases specified, pass them in.
-								parseContainerAliases, ok := decoded["EndpointConfig"].(map[string]interface{})["Aliases"].([]interface{})
+								parseContainerEndpointConfig, ok := decoded["EndpointConfig"].(map[string]interface{})
 								if ok {
-									fmt.Println("ALIASES IS SET")
-									for _, parseContainerAlias := range parseContainerAliases {
-										parsedContainerAlias := parseContainerAlias.(string)
-										if parsedContainerAlias != "" {
-											useContainerAliases = append(useContainerAliases, parsedContainerAlias)
+									fmt.Println("ENDPOINT CONFIG IS SET")
+									parseContainerAliases, ok2 := parseContainerEndpointConfig["Aliases"].([]interface{})
+									if ok2 {
+										fmt.Println("ALIASES IS SET")
+										for _, parseContainerAlias := range parseContainerAliases {
+											parsedContainerAlias := parseContainerAlias.(string)
+											if parsedContainerAlias != "" {
+												useContainerAliases = append(useContainerAliases, parsedContainerAlias)
+											}
 										}
 									}
 								}

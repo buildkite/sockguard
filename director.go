@@ -126,6 +126,13 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 		return r.handleNetworkDelete(l, req, upstream)
 	case match(`GET`, `^/networks/(.+)$`),
 		match(`POST`, `^/networks/(.+)/(connect|disconnect)$`):
+		defer req.Body.Close()
+		connectBody, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			return errorHandler(err.Error(), http.StatusInternalServerError)
+		}
+		fmt.Printf("network connect body: %s\n", connectBody)
+		return upstream
 		if ok, err := r.checkOwner(l, "networks", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
@@ -397,6 +404,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 			// We have networkIdOrName already, see above
 
 			useContainer := ""
+			useContainerEndpointConfig := ""
 			if r.ContainerDockerLink != "" {
 				// Parse the ContainerDockerLink out
 				cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
@@ -407,10 +415,14 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 				useContainer = cdl.Container
 			} else if r.ContainerJoinNetwork != "" {
 				useContainer = r.ContainerJoinNetwork
+				// If network alias specified, set it.
+				if r.ContainerJoinNetworkAlias != "" {
+					useContainerEndpointConfig = fmt.Sprintf(",{\"EndpointConfig\":{\"Aliases\":[\"%s\"]}}", r.ContainerJoinNetworkAlias)
+				}
 			}
 
 			// Do the container attach
-			attachJson := fmt.Sprintf("{\"Container\":\"%s\"}", useContainer)
+			attachJson := fmt.Sprintf("{\"Container\":\"%s\"%s}", useContainer, useContainerEndpointConfig)
 			attachReq, err := http.NewRequest("POST", fmt.Sprintf("http://unix/v%s/networks/%s/connect", apiVersion, networkIdOrName), strings.NewReader(attachJson))
 			attachReq.Header.Set("Content-Type", "application/json")
 			//debugf("Network Connect Request: %+v\n", attachReq)

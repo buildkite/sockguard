@@ -149,8 +149,19 @@ func mockRulesDirectorHttpClientWithUpstreamState(us *upstreamState) *http.Clien
 						} else {
 							var err error
 							if parsePath[3] == "/connect" {
-								// TODO: pass through aliases if specified
-								err = us.connectContainerToNetwork(useContainer, parsePath[2])
+								useContainerAliases := []string{}
+								// If there are Aliases specified, pass them in.
+								parseContainerAliases, ok := decoded["EndpointConfig"].(map[string]interface{})["Aliases"].([]interface{})
+								if ok {
+									fmt.Println("ALIASES IS SET")
+									for _, parseContainerAlias := range parseContainerAliases {
+										parsedContainerAlias := parseContainerAlias.(string)
+										if parsedContainerAlias != "" {
+											useContainerAliases = append(useContainerAliases, parsedContainerAlias)
+										}
+									}
+								}
+								err = us.connectContainerToNetwork(useContainer, parsePath[2], useContainerAliases)
 							} else if parsePath[3] == "/disconnect" {
 								err = us.disconnectContainerToNetwork(useContainer, parsePath[2])
 							}
@@ -584,13 +595,24 @@ func TestHandleNetworkCreate(t *testing.T) {
 			},
 			esc: 200,
 		},
-		// Defaults + -join-network enabled
+		// Defaults + -container-join-network enabled
 		"networks_create_3": handleCreateTests{
 			rd: &rulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                "sockguard-pid-1",
 				ContainerJoinNetwork: "ciagentcontainer",
+			},
+			esc: 200,
+		},
+		// Defaults + -container-join-network + -container-join-network-alias enabled
+		"networks_create_4": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:                     "sockguard-pid-1",
+				ContainerJoinNetwork:      "ciagentcontainer",
+				ContainerJoinNetworkAlias: "ciagentalias",
 			},
 			esc: 200,
 		},
@@ -694,14 +716,25 @@ func TestHandleNetworkCreate(t *testing.T) {
 		if v.rd.ContainerDockerLink != "" || v.rd.ContainerJoinNetwork != "" {
 			ciAgentAttachedNetworks := us.getContainerAttachedNetworks("ciagentcontainer")
 			ciAgentAttachedToNetwork := false
+			ciAgentAttachedToNetworkWithAlias := false
 			for _, vn := range ciAgentAttachedNetworks {
 				if vn.name == inNewNetworkName {
 					ciAgentAttachedToNetwork = true
+					if v.rd.ContainerJoinNetworkAlias == "" {
+						// No alias set, consider this a success
+						ciAgentAttachedToNetworkWithAlias = true
+					} else if cmp.Equal(vn.aliases, []string{v.rd.ContainerJoinNetworkAlias}) == true {
+						// Should also have the correct alias set
+						ciAgentAttachedToNetworkWithAlias = true
+					}
 					break
 				}
 			}
 			if ciAgentAttachedToNetwork == false {
 				t.Errorf("%s : network '%s' exists (or should exist), but ciagentcontainer is not attached", k, inNewNetworkName)
+			}
+			if ciAgentAttachedToNetworkWithAlias == false {
+				t.Errorf("%s : network '%s' exists (or should exist), but ciagentcontainer does not have the alias '%s'", k, inNewNetworkName, v.rd.ContainerJoinNetworkAlias)
 			}
 		}
 
@@ -726,6 +759,10 @@ func TestHandleNetworkDelete(t *testing.T) {
 					upstreamStateContainerAttachedNetwork{
 						name: "alwaysjoinnetwork",
 					},
+					upstreamStateContainerAttachedNetwork{
+						name:    "alwaysjoinnetworkwithalias",
+						aliases: []string{"ciagentalias"},
+					},
 				},
 			},
 		},
@@ -740,6 +777,9 @@ func TestHandleNetworkDelete(t *testing.T) {
 				owner: "sockguard-pid-1",
 			},
 			"alwaysjoinnetwork": upstreamStateNetwork{
+				owner: "sockguard-pid-1",
+			},
+			"alwaysjoinnetworkwithalias": upstreamStateNetwork{
 				owner: "sockguard-pid-1",
 			},
 		},
@@ -775,13 +815,25 @@ func TestHandleNetworkDelete(t *testing.T) {
 			},
 			esc: 200,
 		},
-		// Defaults + -join-network enabled
+		// Defaults + -container-join-network enabled
 		"alwaysjoinnetwork": handleCreateTests{
 			rd: &rulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                "sockguard-pid-1",
 				ContainerJoinNetwork: "ciagentcontainer",
+			},
+			esc: 200,
+		},
+		// Defaults + -container-join-network + -container-join-network-alias enabled
+		// Technically we don't do anything different to the prior here, but added for completeness
+		"alwaysjoinnetworkwithalias": handleCreateTests{
+			rd: &rulesDirector{
+				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
+				// This is what's set in main() as the default, assuming running in a container so PID 1
+				Owner:                     "sockguard-pid-1",
+				ContainerJoinNetwork:      "ciagentcontainer",
+				ContainerJoinNetworkAlias: "ciagentalias",
 			},
 			esc: 200,
 		},

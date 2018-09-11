@@ -1,0 +1,1 @@
+{"Attachable":false,"CheckDuplicate":true,"ConfigFrom":null,"ConfigOnly":false,"Driver":"bridge","EnableIPv6":false,"IPAM":{"Config":[],"Driver":"default","Options":{}},"Ingress":false,"Internal":false,"Labels":{"com.buildkite.sockguard.owner":"sockguard-pid-1"},"Name":"alwaysjoinnetworkwithalias","Options":{},"Scope":""}

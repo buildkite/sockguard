@@ -18,8 +18,10 @@ type upstreamState struct {
 }
 
 type upstreamStateContainer struct {
-	owner            string
-	attachedNetworks []string
+	owner string
+	// key = network name
+	// values = aliases (if any)
+	attachedNetworks map[string][]string
 }
 
 type upstreamStateImage struct {

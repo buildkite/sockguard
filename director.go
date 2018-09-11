@@ -32,9 +32,10 @@ type rulesDirector struct {
 	AllowHostModeNetworking bool
 	ContainerCgroupParent   string
 	// TODOLATER: some enforcement at the struct level to ensure DockerLink + JoinNetwork are mutually exclusive (pick one)
-	ContainerDockerLink  string
-	ContainerJoinNetwork string
-	User                 string
+	ContainerDockerLink       string
+	ContainerJoinNetwork      string
+	ContainerJoinNetworkAlias string
+	User                      string
 }
 
 func writeError(w http.ResponseWriter, msg string, code int) {

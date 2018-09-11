@@ -60,6 +60,7 @@ func main() {
 	user := flag.String("user", "", "Forces --user on containers")
 	dockerLink := flag.String("docker-link", "", "Add a Docker --link from any spawned containers to another container")
 	containerJoinNetwork := flag.String("container-join-network", "", "Always connect this container to new user defined bridge networks (and disconnect on delete)")
+	containerJoinNetworkAlias := flag.String("container-join-network-alias", "", "Alias for network connection of specified container (Requires -container-join-network)")
 	flag.Parse()
 
 	if debug {
@@ -101,6 +102,11 @@ func main() {
 		log.Fatal("Error: -docker-link and -join-network should not be used together.")
 	}
 
+	// Make sure -container-join-network-alias is only specified if -container-join-network is set
+	if *containerJoinNetworkAlias != "" && *containerJoinNetwork == "" {
+		log.Fatal("Error: -container-join-network-alias requires -container-join-network")
+	}
+
 	proxyHttpClient := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -138,18 +144,23 @@ func main() {
 		if joinNetworkContainerExists == false {
 			log.Fatalf("Error: -container-join-network '%s' specified but this container does not exist", *containerJoinNetwork)
 		}
-		debugf("Container '%s' will always be connected to user defined bridged networks created via sockguard", *containerJoinNetwork)
+		debugContainerJoinNetworkAlias := ""
+		if *containerJoinNetworkAlias != "" {
+			debugContainerJoinNetworkAlias = fmt.Sprintf(" (using alias '%s')", *containerJoinNetworkAlias)
+		}
+		debugf("Container '%s'%s will always be connected to user defined bridged networks created via sockguard", *containerJoinNetwork, debugContainerJoinNetworkAlias)
 	}
 
 	proxy := socketproxy.New(*upstream, &rulesDirector{
-		AllowBinds:              allowBinds,
-		AllowHostModeNetworking: *allowHostModeNetworking,
-		ContainerCgroupParent:   *cgroupParent,
-		ContainerDockerLink:     *dockerLink,
-		ContainerJoinNetwork:    *containerJoinNetwork,
-		Owner:                   *owner,
-		User:                    *user,
-		Client:                  &proxyHttpClient,
+		AllowBinds:                allowBinds,
+		AllowHostModeNetworking:   *allowHostModeNetworking,
+		ContainerCgroupParent:     *cgroupParent,
+		ContainerDockerLink:       *dockerLink,
+		ContainerJoinNetwork:      *containerJoinNetwork,
+		ContainerJoinNetworkAlias: *containerJoinNetworkAlias,
+		Owner:                     *owner,
+		User:                      *user,
+		Client:                    &proxyHttpClient,
 	})
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {

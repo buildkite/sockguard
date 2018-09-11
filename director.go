@@ -417,7 +417,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 				useContainer = r.ContainerJoinNetwork
 				// If network alias specified, set it.
 				if r.ContainerJoinNetworkAlias != "" {
-					useContainerEndpointConfig = fmt.Sprintf(",{\"EndpointConfig\":{\"Aliases\":[\"%s\"]}}", r.ContainerJoinNetworkAlias)
+					useContainerEndpointConfig = fmt.Sprintf(",\"EndpointConfig\":{\"Aliases\":[\"%s\"]}", r.ContainerJoinNetworkAlias)
 				}
 			}
 

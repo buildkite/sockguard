@@ -405,6 +405,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 
 			useContainer := ""
 			useContainerEndpointConfig := ""
+			useContainerAlias := ""
 			if r.ContainerDockerLink != "" {
 				// Parse the ContainerDockerLink out
 				cdl, err := splitContainerDockerLink(r.ContainerDockerLink)
@@ -418,6 +419,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 				// If network alias specified, set it.
 				if r.ContainerJoinNetworkAlias != "" {
 					useContainerEndpointConfig = fmt.Sprintf(",\"EndpointConfig\":{\"Aliases\":[\"%s\"]}", r.ContainerJoinNetworkAlias)
+					useContainerAlias = fmt.Sprintf(" (with Alias '%s')", r.ContainerJoinNetworkAlias)
 				}
 			}
 
@@ -440,7 +442,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 				return
 			}
 			// Attached, move on
-			l.Printf("Attached Container ID/Name '%s' to Network '%s' (after creating)", useContainer, networkIdOrName)
+			l.Printf("Attached Container ID/Name '%s'%s to Network '%s' (after creating)", useContainer, useContainerAlias, networkIdOrName)
 		}
 	})
 }

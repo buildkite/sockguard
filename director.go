@@ -126,13 +126,6 @@ func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 		return r.handleNetworkDelete(l, req, upstream)
 	case match(`GET`, `^/networks/(.+)$`),
 		match(`POST`, `^/networks/(.+)/(connect|disconnect)$`):
-		defer req.Body.Close()
-		connectBody, err := ioutil.ReadAll(req.Body)
-		if err != nil {
-			return errorHandler(err.Error(), http.StatusInternalServerError)
-		}
-		fmt.Printf("network connect body: %s\n", connectBody)
-		return upstream
 		if ok, err := r.checkOwner(l, "networks", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {

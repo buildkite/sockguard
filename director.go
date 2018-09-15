@@ -247,21 +247,17 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 			return
 		}
 
-		cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
-		if ok == false {
-			l.Printf("Denied container create: failed to cast CgroupParent to string")
-			writeError(w, "Denied container create: failed to cast CgroupParent to string", http.StatusBadRequest)
-			return
-		}
-		// Prevent setting a CgroupParent if flag is disabled, for host safety
-		if cgroupParent != "" {
-			l.Printf("Denied requested CgroupParent '%s' on container create (flag disabled)", cgroupParent)
-			writeError(w, fmt.Sprintf("Containers aren't allowed to set their own CgroupParent (received '%s')", cgroupParent), http.StatusUnauthorized)
-			return
-		}
-		// Apply the specified CgroupParent, if flag enabled
-		if r.ContainerCgroupParent != "" {
-			l.Printf("Applied CgroupParent '%s'", cgroupParent)
+		if r.ContainerCgroupParent == "" {
+			// Flag is disable,d prevent setting a user defined CgroupParent for host safety
+			cgroupParent, ok := decoded["HostConfig"].(map[string]interface{})["CgroupParent"].(string)
+			if ok == true && cgroupParent != "" {
+				l.Printf("Denied requested CgroupParent '%s' on container create (flag disabled)", cgroupParent)
+				writeError(w, fmt.Sprintf("Containers aren't allowed to set their own CgroupParent (received '%s')", cgroupParent), http.StatusUnauthorized)
+				return
+			}
+		} else {
+			// Apply the specified CgroupParent, flag enabled
+			l.Printf("Applied CgroupParent '%s'", r.ContainerCgroupParent)
 			decoded["HostConfig"].(map[string]interface{})["CgroupParent"] = r.ContainerCgroupParent
 		}
 
@@ -420,7 +416,7 @@ func (r *rulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, ups
 		}
 		// Apply the specified CgroupParent, if flag enabled
 		if r.ContainerCgroupParent != "" {
-			l.Printf("Applied CgroupParent '%s' to image build", cgroupParent)
+			l.Printf("Applied CgroupParent '%s' to image build", r.ContainerCgroupParent)
 			q.Set("cgroupparent", r.ContainerCgroupParent)
 		}
 

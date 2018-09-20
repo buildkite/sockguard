@@ -24,6 +24,29 @@ func init() {
 	flag.BoolVar(&debug, "debug", false, "Show debugging logging for the socket")
 }
 
+// For -join-network startup pre-check
+func checkContainerExists(client *http.Client, idOrName string) (bool, error) {
+	inspectReq, err := http.NewRequest("GET", fmt.Sprintf("http://unix/v%s/containers/%s/json", apiVersion, idOrName), nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := client.Do(inspectReq)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		// Exists
+		return true, nil
+	} else if resp.StatusCode == http.StatusNotFound {
+		// Does not exist
+		return false, nil
+	} else {
+		return false, fmt.Errorf("Unexpected response code %d received from Docker daemon when checking if Container '%s' exists", resp.StatusCode, idOrName)
+	}
+}
+
 func main() {
 	filename := flag.String("filename", "sockguard.sock", "The guarded socket to create")
 	socketMode := flag.String("mode", "0600", "Permissions of the guarded socket")
@@ -35,6 +58,9 @@ func main() {
 	allowHostModeNetworking := flag.Bool("allow-host-mode-networking", false, "Allow containers to run with --net host")
 	cgroupParent := flag.String("cgroup-parent", "", "Set CgroupParent to an arbitrary value on new containers")
 	user := flag.String("user", "", "Forces --user on containers")
+	dockerLink := flag.String("docker-link", "", "Add a Docker --link from any spawned containers to another container")
+	containerJoinNetwork := flag.String("container-join-network", "", "Always connect this container to new user defined bridge networks (and disconnect on delete)")
+	containerJoinNetworkAlias := flag.String("container-join-network-alias", "", "Alias for network connection of specified container (Requires -container-join-network)")
 	flag.Parse()
 
 	if debug {
@@ -71,20 +97,70 @@ func main() {
 		debugf("Setting CgroupParent on new containers to '%s'", *cgroupParent)
 	}
 
-	proxy := socketproxy.New(*upstream, &rulesDirector{
-		AllowBinds:              allowBinds,
-		AllowHostModeNetworking: *allowHostModeNetworking,
-		ContainerCgroupParent:   *cgroupParent,
-		Owner:                   *owner,
-		User:                    *user,
-		Client: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					debugf("Dialing directly")
-					return net.Dial("unix", *upstream)
-				},
+	// These should not be used together, one or the other
+	if *dockerLink != "" && *containerJoinNetwork != "" {
+		log.Fatal("Error: -docker-link and -join-network should not be used together.")
+	}
+
+	// Make sure -container-join-network-alias is only specified if -container-join-network is set
+	if *containerJoinNetworkAlias != "" && *containerJoinNetwork == "" {
+		log.Fatal("Error: -container-join-network-alias requires -container-join-network")
+	}
+
+	proxyHttpClient := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				debugf("Dialing directly")
+				return net.Dial("unix", *upstream)
 			},
 		},
+	}
+
+	if *dockerLink != "" {
+		// Verify the container exists before proceeding
+		splitDockerLink, err := splitContainerDockerLink(*dockerLink)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if splitDockerLink.Container == "" {
+			log.Fatal("Cannot parse -docker-link argument, empty container ID/name returned")
+		}
+		dockerLinkContainerExists, err := checkContainerExists(&proxyHttpClient, splitDockerLink.Container)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		if dockerLinkContainerExists == false {
+			log.Fatalf("Error: -docker-link '%s' specified but this container does not exist", splitDockerLink.Container)
+		}
+		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
+	}
+
+	if *containerJoinNetwork != "" {
+		// TODOLATER: how much does it matter that this container is running?
+		joinNetworkContainerExists, err := checkContainerExists(&proxyHttpClient, *containerJoinNetwork)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		if joinNetworkContainerExists == false {
+			log.Fatalf("Error: -container-join-network '%s' specified but this container does not exist", *containerJoinNetwork)
+		}
+		debugContainerJoinNetworkAlias := ""
+		if *containerJoinNetworkAlias != "" {
+			debugContainerJoinNetworkAlias = fmt.Sprintf(" (using alias '%s')", *containerJoinNetworkAlias)
+		}
+		debugf("Container '%s'%s will always be connected to user defined bridged networks created via sockguard", *containerJoinNetwork, debugContainerJoinNetworkAlias)
+	}
+
+	proxy := socketproxy.New(*upstream, &rulesDirector{
+		AllowBinds:                allowBinds,
+		AllowHostModeNetworking:   *allowHostModeNetworking,
+		ContainerCgroupParent:     *cgroupParent,
+		ContainerDockerLink:       *dockerLink,
+		ContainerJoinNetwork:      *containerJoinNetwork,
+		ContainerJoinNetworkAlias: *containerJoinNetworkAlias,
+		Owner:                     *owner,
+		User:                      *user,
+		Client:                    &proxyHttpClient,
 	})
 	listener, err := net.Listen("unix", *filename)
 	if err != nil {

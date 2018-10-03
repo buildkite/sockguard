@@ -957,6 +957,9 @@ func TestCheckOwner(t *testing.T) {
 			"namewithlabel1": upstreamStateVolume{
 				owner: "test-owner",
 			},
+			"name-with-label2": upstreamStateVolume{
+				owner: "test-owner",
+			},
 		},
 	}
 
@@ -980,6 +983,8 @@ func TestCheckOwner(t *testing.T) {
 		"/v1.37/networks/idwithnolabel": {"networks", false},
 		// A volume that will match
 		"/v1.37/volumes/namewithlabel1": {"volumes", true},
+		// A volume that will match
+		"/v1.37/volumes/name-with-label2": {"volumes", true},
 		// A volume that won't match
 		"/v1.37/volumes/namewithnolabel": {"volumes", false},
 	}

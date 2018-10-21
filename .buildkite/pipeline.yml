@@ -3,7 +3,7 @@ steps:
     command: go test ./...
     plugins:
       golang#v2.0.0:
-        version: 1.10.2
+        version: 1.11.1
         import: github.com/buildkite/sockguard
 
   - wait
@@ -13,15 +13,18 @@ steps:
         build: "."
         import: github.com/buildkite/sockguard
         targets:
-          - version: 1.10.2
+          - version: 1.11.1
             goos: linux
             goarch: amd64
-          - version: 1.10.2
+            gomodule: on
+          - version: 1.11.1
             goos: windows
             goarch: amd64
-          - version: 1.10.2
+            gomodule: on
+          - version: 1.11.1
             goos: darwin
             goarch: amd64
+            gomodule: on
 
   - wait
   - label: ":docker:"

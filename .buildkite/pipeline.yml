@@ -18,15 +18,15 @@ steps:
           - version: 1.11.1
             goos: linux
             goarch: amd64
-            gomodule: on
+            gomodule: "on"
           - version: 1.11.1
             goos: windows
             goarch: amd64
-            gomodule: on
+            gomodule: "on"
           - version: 1.11.1
             goos: darwin
             goarch: amd64
-            gomodule: on
+            gomodule: "on"
 
   - wait
   - label: ":docker:"

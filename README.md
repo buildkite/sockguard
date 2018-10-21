@@ -170,7 +170,7 @@ Based off https://docs.docker.com/engine/api/v1.32.
 
 Let's say you are spawning a `sockguard` instance per ECS task, to pass through a guarded Docker socker to some worker (eg. a CI worker). You may want to apply the same CPU/Memory constraints as the ECS task. This can be done via a bash wrapper to `/sockguard` in a sidecar container (ensure you have `bash`, `curl` and `jq` available):
 
-```
+```bash
 #!/bin/bash
 
 set -euo pipefail
@@ -205,4 +205,13 @@ fi
 
 # Start sockguard with some args
 exec /sockguard -cgroup-parent '${cgroup_parent}' -owner-label '${cgroup_parent}' ...other args...
+```
+
+## Development
+
+Sockguard is built with Golang 1.11 and modules.
+
+```
+export GO111MODULE=on
+go run .
 ```

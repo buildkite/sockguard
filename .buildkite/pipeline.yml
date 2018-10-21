@@ -9,7 +9,7 @@ steps:
   - wait
   - label: "🛠"
     plugins:
-      golang-cross-compile#v1.0.0:
+      golang-cross-compile#v1.3.0:
         build: "."
         import: github.com/buildkite/sockguard
         targets:

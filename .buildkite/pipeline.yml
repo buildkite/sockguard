@@ -5,6 +5,8 @@ steps:
       golang#v2.0.0:
         version: 1.11.1
         import: github.com/buildkite/sockguard
+        environment:
+          - GO111MODULE=on
 
   - wait
   - label: "🛠"

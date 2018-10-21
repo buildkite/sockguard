@@ -2,31 +2,36 @@ steps:
   - label: "🔎"
     command: go test ./...
     plugins:
-      golang#v2.0.0:
-        version: 1.10.2
-        import: github.com/buildkite/sockguard
+      - golang#v2.0.0:
+          version: 1.11.1
+          import: github.com/buildkite/sockguard
+          environment:
+            - GO111MODULE=on
 
   - wait
   - label: "🛠"
     plugins:
-      golang-cross-compile#v1.0.0:
-        build: "."
-        import: github.com/buildkite/sockguard
-        targets:
-          - version: 1.10.2
-            goos: linux
-            goarch: amd64
-          - version: 1.10.2
-            goos: windows
-            goarch: amd64
-          - version: 1.10.2
-            goos: darwin
-            goarch: amd64
+      - golang-cross-compile#v1.3.0:
+          build: "."
+          import: github.com/buildkite/sockguard
+          targets:
+            - version: 1.11.1
+              goos: linux
+              goarch: amd64
+              gomodule: "on"
+            - version: 1.11.1
+              goos: windows
+              goarch: amd64
+              gomodule: "on"
+            - version: 1.11.1
+              goos: darwin
+              goarch: amd64
+              gomodule: "on"
 
   - wait
   - label: ":docker:"
     branches: master
     plugins:
-      docker-login#v2.0.1: ~
-      docker-compose#v2.5.1:
-        push: sockguard
+      - docker-login#v2.0.1: ~
+      - docker-compose#v2.5.1:
+          push: sockguard

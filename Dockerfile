@@ -1,5 +1,6 @@
 FROM golang:1.10-alpine as builder
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git
+RUN go get github.com/kvz/logstreamer
 WORKDIR /go/src/github.com/buildkite/sockguard
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \

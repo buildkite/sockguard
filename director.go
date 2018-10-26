@@ -189,6 +189,11 @@ func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty
 		return false, fmt.Errorf("Unable to find an identifier in %s", path)
 	}
 
+	return r.checkIdentifierOwner(l, kind, identifier, allowEmpty)
+}
+
+func (r *rulesDirector) checkIdentifierOwner(l socketproxy.Logger, kind string, identifier string, allowEmpty bool) (bool, error) {
+
 	l.Printf("Looking up identifier %q", identifier)
 
 	labels, err := r.inspectLabels(kind, identifier)
@@ -196,16 +201,16 @@ func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty
 		return false, err
 	}
 
-	l.Printf("Labels for %s: %v", path, labels)
+	l.Printf("Labels for %s/%s: %v", kind, identifier, labels)
 
 	if val, exists := labels[ownerKey]; exists && val == r.Owner {
-		l.Printf("Allow, %s matches owner %q", path, r.Owner)
+		l.Printf("Allow, %s/%s matches owner %q", kind, identifier, r.Owner)
 		return true, nil
 	} else if !exists && allowEmpty {
-		l.Printf("Allow, %s has no owner", path)
+		l.Printf("Allow, %s/%s has no owner", kind, identifier)
 		return true, nil
 	} else {
-		l.Printf("Deny, %s has owner %q, wanted %q", path, val, r.Owner)
+		l.Printf("Deny, %s/%s has owner %q, wanted %q", kind, identifier, val, r.Owner)
 		return false, nil
 	}
 }
@@ -236,7 +241,12 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 		binds, ok := decoded["HostConfig"].(map[string]interface{})["Binds"].([]interface{})
 		if ok {
 			for _, bind := range binds {
-				if !isBindAllowed(bind.(string), r.AllowBinds) {
+				isAllowed, err := r.isBindAllowed(l, bind.(string), r.AllowBinds, req)
+				if err != nil {
+					writeError(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				if !isAllowed {
 					l.Printf("Denied host bind %q", bind)
 					writeError(w, "Host binds aren't allowed", http.StatusUnauthorized)
 					return
@@ -311,7 +321,8 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 	})
 }
 
-func isBindAllowed(bind string, allowed []string) bool {
+func (r *rulesDirector) isBindAllowed(l socketproxy.Logger, bind string, allowed []string, req *http.Request) (bool, error) {
+
 	chunks := strings.Split(bind, ":")
 
 	// host-src:container-dest
@@ -325,14 +336,21 @@ func isBindAllowed(bind string, allowed []string) bool {
 
 		for _, allowedPath := range allowed {
 			if strings.HasPrefix(hostSrc, allowedPath) {
-				return true
+				return true, nil
 			}
 		}
 
-		return false
+		return false, nil
 	}
 
-	return true
+	// There is a request to bind volume, let's check the ownership
+	volumeName := chunks[0]
+	isOwner, err := r.checkIdentifierOwner(l, "volumes", volumeName, false)
+	if err != nil {
+		return false, err
+	}
+
+	return isOwner, nil
 }
 
 type containerDockerLink struct {

@@ -324,7 +324,7 @@ func isBindAllowed(bind string, allowed []string) bool {
 		hostSrc := filepath.FromSlash(path.Clean("/" + chunks[0]))
 
 		for _, allowedPath := range allowed {
-			if strings.HasPrefix(hostSrc, allowedPath) {
+			if allowedPath == hostSrc || strings.HasPrefix(hostSrc, allowedPath + "/") {
 				return true
 			}
 		}

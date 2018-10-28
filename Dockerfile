@@ -1,4 +1,4 @@
-FROM golang:1.10-alpine as builder
+FROM golang:1.11-alpine as builder
 RUN apk add --no-cache ca-certificates
 WORKDIR /go/src/github.com/buildkite/sockguard
 COPY . .

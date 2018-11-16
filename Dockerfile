@@ -1,6 +1,9 @@
-FROM golang:1.10-alpine as builder
-RUN apk add --no-cache ca-certificates
+FROM golang:1.11-alpine as builder
+RUN apk add --no-cache ca-certificates git
+ENV GO111MODULE=on
 WORKDIR /go/src/github.com/buildkite/sockguard
+ADD go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   go build -a -installsuffix cgo -ldflags="-w -s" -o /go/bin/sockguard

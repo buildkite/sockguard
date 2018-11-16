@@ -138,9 +138,9 @@ func (s *SocketProxy) ServeViaUpstreamSocket(l *log.Logger, w http.ResponseWrite
 		defer wg.Done()
 		n, err := io.Copy(io.MultiWriter(sock, sockDebug), reqConn)
 		if err != nil {
-			l.Printf("Err: %v", err)
+			l.Printf("Error copying request to socket: %v", err)
 		}
-		l.Printf("Copied %d bytes from connection", n)
+		l.Printf("Copied %d bytes from downstream connection", n)
 	}()
 
 	// copy from socket to request
@@ -148,9 +148,16 @@ func (s *SocketProxy) ServeViaUpstreamSocket(l *log.Logger, w http.ResponseWrite
 		defer wg.Done()
 		n, err := io.Copy(io.MultiWriter(reqConn, connDebug), sock)
 		if err != nil {
-			l.Printf("Err: %v", err)
+			l.Printf("Error copying socket to request: %v", err)
 		}
-		l.Printf("Copied %d bytes from socket", n)
+		l.Printf("Copied %d bytes from upstream socket", n)
+
+		if err := bufrw.Flush(); err != nil {
+			l.Printf("Error flushing buffer: %v", err)
+		}
+		if err := reqConn.Close(); err != nil {
+			l.Printf("Error closing connection: %v", err)
+		}
 	}()
 
 	wg.Wait()

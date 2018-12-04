@@ -1,4 +1,4 @@
-package main
+package sockguard
 
 import (
 	"bytes"
@@ -24,18 +24,18 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req), nil
 }
 
-// Reusable mock rulesDirector instance
-func mockRulesDirector() *rulesDirector {
-	return &rulesDirector{
+// Reusable mock RulesDirector instance
+func mockRulesDirector() *RulesDirector {
+	return &RulesDirector{
 		Client:                  &http.Client{},
 		Owner:                   "test-owner",
 		AllowHostModeNetworking: false,
 	}
 }
 
-// Reusable mock rulesDirector instance - with "state" management of mocked upstream Docker daemon
+// Reusable mock RulesDirector instance - with "state" management of mocked upstream Docker daemon
 // Just containers/networks initially
-func mockRulesDirectorWithUpstreamState(us *upstreamState) *rulesDirector {
+func mockRulesDirectorWithUpstreamState(us *upstreamState) *RulesDirector {
 	rd := mockRulesDirector()
 	rd.Client = mockRulesDirectorHttpClientWithUpstreamState(us)
 	return rd
@@ -307,7 +307,7 @@ func loadFixtureFile(filename_part string) (string, error) {
 
 // Used for handleContainerCreate(), handleNetworkCreate(), and friends
 type handleCreateTests struct {
-	rd *rulesDirector
+	rd *RulesDirector
 	// Expected StatusCode
 	esc int
 }
@@ -321,7 +321,7 @@ func TestHandleContainerCreate(t *testing.T) {
 	tests := map[string]handleCreateTests{
 		// Defaults
 		"containers_create_1": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -330,7 +330,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + custom Owner
 		"containers_create_2": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				Owner:  "test-owner",
 			},
@@ -338,7 +338,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults with Binds disabled, and a bind sent (should fail)
 		"containers_create_3": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:      "sockguard-pid-1",
@@ -348,7 +348,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Binds enabled + a matching bind (should pass)
 		"containers_create_4": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:      "sockguard-pid-1",
@@ -358,7 +358,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Binds enabled + a non-matching bind (should fail)
 		"containers_create_5": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:      "sockguard-pid-1",
@@ -368,7 +368,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Host Mode Networking + request with NetworkMode=host (should pass)
 		"containers_create_6": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                   "sockguard-pid-1",
@@ -378,7 +378,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Host Mode Networking disabled + request with NetworkMode=host (should fail)
 		"containers_create_7": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                   "sockguard-pid-1",
@@ -388,7 +388,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Cgroup Parent
 		"containers_create_8": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                 "sockguard-pid-1",
@@ -398,7 +398,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + Force User
 		"containers_create_9": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -408,7 +408,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + a custom label on request
 		"containers_create_10": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -417,7 +417,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + -docker-link sockguard + requesting default bridge network
 		"containers_create_11": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
@@ -427,7 +427,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + -docker-link sockguard flag + requesting a user defined bridge network
 		"containers_create_12": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
@@ -437,7 +437,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + try set a CgroupParent (should fail, only permitted if sockguard started with -cgroup-parent)
 		"containers_create_13": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -446,7 +446,7 @@ func TestHandleContainerCreate(t *testing.T) {
 		},
 		// Defaults + -docker-link sockguard flag + requesting default bridge network + another arbitrary --link from client
 		"containers_create_14": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
@@ -580,7 +580,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 	tests := map[string]handleCreateTests{
 		// Defaults
 		"networks_create_1": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -589,7 +589,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 		},
 		// Defaults + -docker-link enabled
 		"networks_create_2": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
@@ -599,7 +599,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 		},
 		// Defaults + -container-join-network enabled
 		"networks_create_3": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                "sockguard-pid-1",
@@ -609,7 +609,7 @@ func TestHandleNetworkCreate(t *testing.T) {
 		},
 		// Defaults + -container-join-network + -container-join-network-alias enabled
 		"networks_create_4": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                     "sockguard-pid-1",
@@ -791,7 +791,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 	tests := map[string]handleCreateTests{
 		// Defaults (owner label matches, should pass)
 		"somenetwork": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -800,7 +800,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 		},
 		// Defaults (owner label does not match, should fail)
 		"anothernetwork": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -809,7 +809,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 		},
 		// Defaults + -docker-link enabled
 		"whatevernetwork": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:               "sockguard-pid-1",
@@ -819,7 +819,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 		},
 		// Defaults + -container-join-network enabled
 		"alwaysjoinnetwork": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                "sockguard-pid-1",
@@ -830,7 +830,7 @@ func TestHandleNetworkDelete(t *testing.T) {
 		// Defaults + -container-join-network + -container-join-network-alias enabled
 		// Technically we don't do anything different to the prior here, but added for completeness
 		"alwaysjoinnetworkwithalias": handleCreateTests{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: mockRulesDirectorHttpClientWithUpstreamState(&us),
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                     "sockguard-pid-1",
@@ -1000,7 +1000,7 @@ func TestCheckOwner(t *testing.T) {
 }
 
 type handleBuildTest struct {
-	rd *rulesDirector
+	rd *RulesDirector
 	// Expected StatusCode
 	esc int
 
@@ -1014,7 +1014,7 @@ func TestHandleBuild(t *testing.T) {
 	tests := []handleBuildTest{
 		// Defaults
 		handleBuildTest{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -1025,7 +1025,7 @@ func TestHandleBuild(t *testing.T) {
 		},
 		// Defaults + custom label
 		handleBuildTest{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",
@@ -1036,7 +1036,7 @@ func TestHandleBuild(t *testing.T) {
 		},
 		// Defaults + CgroupParent in config (should pass)
 		handleBuildTest{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner:                 "sockguard-pid-1",
@@ -1048,7 +1048,7 @@ func TestHandleBuild(t *testing.T) {
 		},
 		// Defaults + CgroupParent in API request (should fail)
 		handleBuildTest{
-			rd: &rulesDirector{
+			rd: &RulesDirector{
 				Client: &http.Client{},
 				// This is what's set in main() as the default, assuming running in a container so PID 1
 				Owner: "sockguard-pid-1",

@@ -1,4 +1,4 @@
-package main
+package sockguard
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ var (
 	versionRegex = regexp.MustCompile(`^/v\d\.\d+\b`)
 )
 
-type rulesDirector struct {
+type RulesDirector struct {
 	Client                  *http.Client
 	Owner                   string
 	AllowBinds              []string
@@ -46,7 +46,7 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 	})
 }
 
-func (r *rulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	var match = func(method string, pattern string) bool {
 		if method != "*" && method != req.Method {
 			return false
@@ -170,7 +170,7 @@ var identifierPatterns = []*regexp.Regexp{
 
 // Check owner takes a request for /vx.x/{kind}/{id} and uses inspect to see if it's
 // got the correct owner label.
-func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
+func (r *RulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty bool, req *http.Request) (bool, error) {
 	path := req.URL.Path
 	if versionRegex.MatchString(path) {
 		path = versionRegex.ReplaceAllString(path, "")
@@ -192,7 +192,7 @@ func (r *rulesDirector) checkOwner(l socketproxy.Logger, kind string, allowEmpty
 	return r.checkIdentifierOwner(l, kind, identifier, allowEmpty)
 }
 
-func (r *rulesDirector) checkIdentifierOwner(l socketproxy.Logger, kind string, identifier string, allowEmpty bool) (bool, error) {
+func (r *RulesDirector) checkIdentifierOwner(l socketproxy.Logger, kind string, identifier string, allowEmpty bool) (bool, error) {
 
 	l.Printf("Looking up identifier %q", identifier)
 
@@ -215,7 +215,7 @@ func (r *rulesDirector) checkIdentifierOwner(l socketproxy.Logger, kind string, 
 	}
 }
 
-func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var decoded map[string]interface{}
 
@@ -321,7 +321,7 @@ func (r *rulesDirector) handleContainerCreate(l socketproxy.Logger, req *http.Re
 	})
 }
 
-func (r *rulesDirector) isBindAllowed(l socketproxy.Logger, bind string, allowed []string, req *http.Request) (bool, error) {
+func (r *RulesDirector) isBindAllowed(l socketproxy.Logger, bind string, allowed []string, req *http.Request) (bool, error) {
 
 	chunks := strings.Split(bind, ":")
 
@@ -335,7 +335,7 @@ func (r *rulesDirector) isBindAllowed(l socketproxy.Logger, bind string, allowed
 		hostSrc := filepath.FromSlash(path.Clean("/" + chunks[0]))
 
 		for _, allowedPath := range allowed {
-			if allowedPath == hostSrc || strings.HasPrefix(hostSrc, allowedPath + "/") {
+			if allowedPath == hostSrc || strings.HasPrefix(hostSrc, allowedPath+"/") {
 				return true, nil
 			}
 		}
@@ -375,7 +375,7 @@ func splitContainerDockerLink(input string) (*containerDockerLink, error) {
 	}
 }
 
-func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Not using modifyRequestBody since we need the decoded network name further down, less duplication this way
 		var decoded map[string]interface{}
@@ -454,7 +454,7 @@ func (r *rulesDirector) handleNetworkCreate(l socketproxy.Logger, req *http.Requ
 	})
 }
 
-func (r *rulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) handleNetworkDelete(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ok, err := r.checkOwner(l, "networks", true, req)
 		if ok == false {
@@ -528,7 +528,7 @@ func addLabel(label, value string, into interface{}) {
 	}
 }
 
-func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		err := modifyRequestBody(req, func(decoded map[string]interface{}) {
 			addLabel(ownerKey, r.Owner, decoded["Labels"])
@@ -541,7 +541,7 @@ func (r *rulesDirector) addLabelsToBody(l socketproxy.Logger, req *http.Request,
 	})
 }
 
-func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var q = req.URL.Query()
 		var filters = map[string][]interface{}{}
@@ -597,7 +597,7 @@ func (r *rulesDirector) addLabelsToQueryStringFilters(l socketproxy.Logger, req 
 	})
 }
 
-func (r *rulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
+func (r *RulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, upstream http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Parse out query string to modify it
 		var q = req.URL.Query()
@@ -643,7 +643,7 @@ func (r *rulesDirector) handleBuild(l socketproxy.Logger, req *http.Request, ups
 
 var errInspectNotFound = errors.New("Not found")
 
-func (r *rulesDirector) getInto(into interface{}, path string, arg ...interface{}) error {
+func (r *RulesDirector) getInto(into interface{}, path string, arg ...interface{}) error {
 	u := fmt.Sprintf("http://docker/v%s%s", apiVersion, fmt.Sprintf(path, arg...))
 
 	resp, err := r.Client.Get(u)
@@ -661,7 +661,7 @@ func (r *rulesDirector) getInto(into interface{}, path string, arg ...interface{
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
-func (r *rulesDirector) inspectLabels(kind, id string) (map[string]string, error) {
+func (r *RulesDirector) inspectLabels(kind, id string) (map[string]string, error) {
 	switch kind {
 	case "containers", "images":
 		var result struct {
@@ -709,4 +709,27 @@ func modifyRequestBody(req *http.Request, f func(filters map[string]interface{})
 	req.Body = ioutil.NopCloser(bytes.NewReader(encoded))
 
 	return nil
+}
+
+// For -join-network startup pre-check
+func CheckContainerExists(client *http.Client, idOrName string) (bool, error) {
+	inspectReq, err := http.NewRequest("GET", fmt.Sprintf("http://unix/v%s/containers/%s/json", apiVersion, idOrName), nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := client.Do(inspectReq)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		// Exists
+		return true, nil
+	} else if resp.StatusCode == http.StatusNotFound {
+		// Does not exist
+		return false, nil
+	} else {
+		return false, fmt.Errorf("Unexpected response code %d received from Docker daemon when checking if Container '%s' exists", resp.StatusCode, idOrName)
+	}
 }

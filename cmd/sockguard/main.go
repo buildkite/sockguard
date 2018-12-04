@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/buildkite/sockguard"
 	"github.com/buildkite/sockguard/socketproxy"
 )
 
@@ -22,29 +23,6 @@ var (
 
 func init() {
 	flag.BoolVar(&debug, "debug", false, "Show debugging logging for the socket")
-}
-
-// For -join-network startup pre-check
-func checkContainerExists(client *http.Client, idOrName string) (bool, error) {
-	inspectReq, err := http.NewRequest("GET", fmt.Sprintf("http://unix/v%s/containers/%s/json", apiVersion, idOrName), nil)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err := client.Do(inspectReq)
-	if err != nil {
-		return false, err
-	}
-
-	if resp.StatusCode == http.StatusOK {
-		// Exists
-		return true, nil
-	} else if resp.StatusCode == http.StatusNotFound {
-		// Does not exist
-		return false, nil
-	} else {
-		return false, fmt.Errorf("Unexpected response code %d received from Docker daemon when checking if Container '%s' exists", resp.StatusCode, idOrName)
-	}
 }
 
 func main() {
@@ -117,27 +95,23 @@ func main() {
 	}
 
 	if *dockerLink != "" {
-		// Verify the container exists before proceeding
-		splitDockerLink, err := splitContainerDockerLink(*dockerLink)
+		container, _, err := parseDockerLink(*dockerLink)
 		if err != nil {
 			log.Fatal(err)
 		}
-		if splitDockerLink.Container == "" {
-			log.Fatal("Cannot parse -docker-link argument, empty container ID/name returned")
-		}
-		dockerLinkContainerExists, err := checkContainerExists(&proxyHttpClient, splitDockerLink.Container)
+		dockerLinkContainerExists, err := sockguard.CheckContainerExists(&proxyHttpClient, container)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
 		if dockerLinkContainerExists == false {
-			log.Fatalf("Error: -docker-link '%s' specified but this container does not exist", splitDockerLink.Container)
+			log.Fatalf("Error: -docker-link '%s' specified but this container does not exist", container)
 		}
 		debugf("Adding a Docker --link to new containers: '%s'", *dockerLink)
 	}
 
 	if *containerJoinNetwork != "" {
 		// TODOLATER: how much does it matter that this container is running?
-		joinNetworkContainerExists, err := checkContainerExists(&proxyHttpClient, *containerJoinNetwork)
+		joinNetworkContainerExists, err := sockguard.CheckContainerExists(&proxyHttpClient, *containerJoinNetwork)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -151,7 +125,7 @@ func main() {
 		debugf("Container '%s'%s will always be connected to user defined bridged networks created via sockguard", *containerJoinNetwork, debugContainerJoinNetworkAlias)
 	}
 
-	proxy := socketproxy.New(*upstream, &rulesDirector{
+	proxy := socketproxy.New(*upstream, &sockguard.RulesDirector{
 		AllowBinds:                allowBinds,
 		AllowHostModeNetworking:   *allowHostModeNetworking,
 		ContainerCgroupParent:     *cgroupParent,
@@ -194,6 +168,19 @@ func main() {
 	if err = http.Serve(listener, proxy); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// extractd from director.go, to be refactored out
+func parseDockerLink(input string) (string, string, error) {
+	if splitInput := strings.Split(input, ":"); len(splitInput) == 1 {
+		// container
+		return splitInput[0], splitInput[0], nil
+	} else if len(splitInput) == 2 {
+		// container:alias
+		return splitInput[0], splitInput[1], nil
+	}
+	return "", "", fmt.Errorf(
+		"Unable to parse docker link %q, expected container:alias", input)
 }
 
 func debugf(format string, v ...interface{}) {

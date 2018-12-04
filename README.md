@@ -213,5 +213,5 @@ Sockguard is built with Golang 1.11 and modules.
 
 ```
 export GO111MODULE=on
-go run .
+go run ./cmd/sockguard
 ```

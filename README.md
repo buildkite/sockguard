@@ -181,7 +181,7 @@ set -euo pipefail
 
 # A) Use the container ID from /proc/self/cgroup
 # (note: this works fine on a systemd based system, need to adjust the grep on pre-systemd? fine for us right now)
-container_id=$(cat /proc/self/cgroup | grep "1:name=systemd" | rev | cut -d/ -f1 | rev)
+container_id=$(awk -F/ '/1:name=systemd/ {print $NF}' /proc/self/cgroup)
 
 # B) Use the hostname
 # (note: works, as long as someone doesnt start the container with --hostname. A) preferred for now)

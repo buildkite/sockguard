@@ -143,7 +143,7 @@ func (r *RulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 		return r.addLabelsToBody(l, req, upstream)
 	case match(`POST`, `^/volumes/prune$`):
 		return r.addLabelsToQueryStringFilters(l, req, upstream)
-	case match(`GET`, `^/volumes/(\w+)$`), match(`DELETE`, `^/volumes/(\w+)$`):
+	case match(`GET`, `^/volumes/([-\w]+)$`), match(`DELETE`, `^/volumes/(-\w+)$`):
 		if ok, err := r.checkOwner(l, "volumes", true, req); ok {
 			return upstream
 		} else if err == errInspectNotFound {
@@ -162,7 +162,7 @@ func (r *RulesDirector) Direct(l socketproxy.Logger, req *http.Request, upstream
 var identifierPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/containers/(.+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/networks/(.+?)(?:/\w+)?$`),
-	regexp.MustCompile(`^/volumes/(\w+?)(?:/\w+)?$`),
+	regexp.MustCompile(`^/volumes/([-\w]+?)(?:/\w+)?$`),
 	regexp.MustCompile(`^/images/(.+?)/(?:json|history|push|tag)$`),
 	regexp.MustCompile(`^/images/([^/]+)$`),
 	regexp.MustCompile(`^/images/(\w+/[^/]+)$`),

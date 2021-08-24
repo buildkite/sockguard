@@ -1,3 +1,5 @@
+> :warning: **This is a discontinued experiment**: Much better technology now exists to solve this problem, such as [secure docker-in-docker with sysbox](https://github.com/nestybox/sysbox). 
+
 # Sockguard
 
 Safely providing access to a docker daemon to untrusted containers is [challenging](https://docs.docker.com/engine/security/https/). By design docker doesn't provide any sort of access control over what can be done over that socket, so anything which has the socket has the same influence over your system as the user that docker is running as. This includes the host filesystem via mounts. To compound this, the default configuration of most docker installations has docker running with root privileges.
